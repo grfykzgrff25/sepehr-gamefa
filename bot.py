@@ -4,6 +4,7 @@ import json
 import html
 import asyncio
 import logging
+
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 
@@ -28,9 +29,15 @@ from openai import AsyncOpenAI
 # SETTINGS
 # ============================================================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+BOT_TOKEN = os.getenv(
+    "BOT_TOKEN",
+    ""
+).strip()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_API_KEY = os.getenv(
+    "OPENAI_API_KEY",
+    ""
+).strip()
 
 CHANNEL_ID = os.getenv(
     "CHANNEL_ID",
@@ -43,23 +50,29 @@ MODEL = os.getenv(
 ).strip()
 
 
-# ------------------------------------------------------------
+# ============================================================
 # ADMIN ID
-# ------------------------------------------------------------
+# ============================================================
 
 try:
     ADMIN_ID = int(
-        os.getenv("ADMIN_ID", "0") or "0"
+        os.getenv(
+            "ADMIN_ID",
+            "0"
+        ) or "0"
     )
+
 except (ValueError, TypeError):
     ADMIN_ID = 0
 
 
-# ------------------------------------------------------------
+# ============================================================
 # MEMORY
-# ------------------------------------------------------------
+# ============================================================
 
-MEMORY_FILE = Path("news_memory.json")
+MEMORY_FILE = Path(
+    "news_memory.json"
+)
 
 MAX_MEMORY = 1500
 
@@ -79,7 +92,9 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
-log = logging.getLogger("gamefa_bot")
+log = logging.getLogger(
+    "gamefa_bot"
+)
 
 
 # ============================================================
@@ -93,7 +108,9 @@ def load_memory():
     try:
 
         if not MEMORY_FILE.exists():
+
             memory = []
+
             return
 
         data = json.loads(
@@ -103,8 +120,11 @@ def load_memory():
         )
 
         if isinstance(data, list):
+
             memory = data
+
         else:
+
             memory = []
 
     except Exception as error:
@@ -190,6 +210,14 @@ def similarity(a, b):
 
 
 def duplicate(text):
+
+    if isinstance(text, dict):
+
+        text = (
+            text.get("title", "")
+            + "\n"
+            + text.get("body", "")
+        )
 
     for item in memory:
 
@@ -280,10 +308,10 @@ def starts_with_persian(text):
     if not clean:
         return False
 
-    first = clean[0]
-
     return bool(
-        PERSIAN_RE.match(first)
+        PERSIAN_RE.match(
+            clean[0]
+        )
     )
 
 
@@ -342,8 +370,7 @@ def detect_category(text):
         "elden ring",
         "minecraft",
         "fortnite",
-        "call of duty",
-        "battlefield"
+        "call of duty"
     ]
 
     movie_words = [
@@ -367,19 +394,21 @@ def detect_category(text):
         word in text_lower
         for word in game_words
     ):
+
         return "🎮"
 
     if any(
         word in text_lower
         for word in movie_words
     ):
+
         return "🎬"
 
     return "📱"
 
 
 # ============================================================
-# AI TEXT CLEAN
+# CLEAN AI TEXT
 # ============================================================
 
 def clean_ai_text(text):
@@ -429,7 +458,7 @@ def clean_ai_text(text):
         text
     )
 
-    # حذف ایموجی بنفش ابتدای بند
+    # حذف ایموجی‌های ابتدای خط
     text = re.sub(
         r"^\s*🟣\s*",
         "",
@@ -507,6 +536,11 @@ def format_post(ai_text):
             line
         )
 
+    # یک پاراگراف
+    body = " ".join(
+        body_parts
+    ).strip()
+
     # ========================================================
     # CATEGORY
     # ========================================================
@@ -514,7 +548,7 @@ def format_post(ai_text):
     category = detect_category(
         title
         + " "
-        + " ".join(body_lines)
+        + body
     )
 
     title = (
@@ -533,11 +567,7 @@ def format_post(ai_text):
         + "</b>"
     )
 
-    if body_parts:
-
-        body = " ".join(
-            body_parts
-        )
+    if body:
 
         result += (
             "\n\n🟣 "
@@ -558,7 +588,9 @@ def format_post(ai_text):
 
 async def fetch_gamefa(url):
 
-    parsed = urlparse(url)
+    parsed = urlparse(
+        url
+    )
 
     if "gamefa.com" not in (
         parsed.netloc.lower()
@@ -569,11 +601,13 @@ async def fetch_gamefa(url):
         )
 
     headers = {
-        "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "User-Agent": (
+            "Mozilla/5.0 "
+            "(Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 "
             "(KHTML, like Gecko) "
             "Chrome/151 Safari/537.36"
+        )
     }
 
     timeout = aiohttp.ClientTimeout(
@@ -605,18 +639,22 @@ async def fetch_gamefa(url):
         "html.parser"
     )
 
-    for element in soup(
-        [
-            "script",
-            "style",
-            "noscript",
-            "svg",
-            "nav",
-            "footer",
-            "form",
-            "aside"
-        ]
-    ):
+    # ========================================================
+    # REMOVE UNNECESSARY ELEMENTS
+    # ========================================================
+
+    for element in soup([
+        "script",
+        "style",
+        "noscript",
+        "svg",
+        "nav",
+        "footer",
+        "form",
+        "aside",
+        "header",
+        "iframe"
+    ]):
 
         element.decompose()
 
@@ -624,7 +662,9 @@ async def fetch_gamefa(url):
     # TITLE
     # ========================================================
 
-    h1 = soup.find("h1")
+    h1 = soup.find(
+        "h1"
+    )
 
     if h1:
 
@@ -663,12 +703,14 @@ async def fetch_gamefa(url):
             attrs=attrs
         )
 
-        if meta and meta.get(
-            "content"
+        if (
+            meta
+            and meta.get("content")
         ):
 
             description = (
-                meta["content"].strip()
+                meta["content"]
+                .strip()
             )
 
             break
@@ -692,8 +734,9 @@ async def fetch_gamefa(url):
             attrs=attrs
         )
 
-        if meta and meta.get(
-            "content"
+        if (
+            meta
+            and meta.get("content")
         ):
 
             image = urljoin(
@@ -704,25 +747,38 @@ async def fetch_gamefa(url):
             break
 
     # ========================================================
-    # BODY
+    # ARTICLE
     # ========================================================
 
     article = (
         soup.find("article")
+        or soup.find("main")
         or soup
     )
 
-    paragraphs = article.find_all(
-        [
-            "p",
-            "h2",
-            "h3"
-        ]
-    )
+    for element in article.find_all([
+        "script",
+        "style",
+        "noscript",
+        "nav",
+        "footer",
+        "aside",
+        "form",
+        "iframe",
+        "button"
+    ]):
 
-    body_parts = []
+        element.decompose()
 
-    for paragraph in paragraphs:
+    # ========================================================
+    # PARAGRAPHS
+    # ========================================================
+
+    paragraphs = []
+
+    for paragraph in article.find_all(
+        "p"
+    ):
 
         text = paragraph.get_text(
             " ",
@@ -735,15 +791,109 @@ async def fetch_gamefa(url):
             text
         ).strip()
 
-        if len(text) >= 35:
+        if len(text) < 40:
+            continue
 
-            body_parts.append(
-                text
+        ignored_phrases = [
+            "مطالب مرتبط",
+            "اخبار مرتبط",
+            "تبلیغات",
+            "عضویت در کانال",
+            "دنبال کنید",
+            "ارسال دیدگاه",
+            "ثبت دیدگاه",
+            "gamefa.com"
+        ]
+
+        if (
+            any(
+                phrase.lower()
+                in text.lower()
+                for phrase in ignored_phrases
+            )
+            and len(text) < 180
+        ):
+
+            continue
+
+        paragraphs.append(
+            text
+        )
+
+    # ========================================================
+    # FALLBACK
+    # ========================================================
+
+    if not paragraphs:
+
+        for block in article.find_all([
+            "div",
+            "section"
+        ]):
+
+            text = block.get_text(
+                " ",
+                strip=True
             )
 
+            text = re.sub(
+                r"\s+",
+                " ",
+                text
+            ).strip()
+
+            if (
+                80
+                <= len(text)
+                <= 1500
+            ):
+
+                paragraphs.append(
+                    text
+                )
+
+    # ========================================================
+    # REMOVE DUPLICATE PARAGRAPHS
+    # ========================================================
+
+    unique_paragraphs = []
+
+    seen = set()
+
+    for paragraph in paragraphs:
+
+        key = norm(
+            paragraph
+        )
+
+        if not key:
+            continue
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        unique_paragraphs.append(
+            paragraph
+        )
+
+    # ========================================================
+    # FULL ARTICLE
+    # ========================================================
+
     body = "\n".join(
-        body_parts
-    )[:24000]
+        unique_paragraphs
+    )
+
+    # حداکثر متن ورودی به AI
+    body = body[:30000]
+
+    log.info(
+        "Gamefa article extracted: %d paragraphs / %d chars",
+        len(unique_paragraphs),
+        len(body)
+    )
 
     return {
         "url": final_url,
@@ -755,71 +905,135 @@ async def fetch_gamefa(url):
 
 
 # ============================================================
-# AI
+# AI PROMPT
 # ============================================================
 
 PROMPT = """
 تو ویراستار حرفه‌ای اخبار کانال Gamefa هستی.
 
-از اطلاعات داده‌شده یک خبر فارسی آماده انتشار بساز.
+وظیفه تو این است که مقاله کامل داده‌شده را بخوانی و
+از آن یک خبر فارسی کوتاه، روان و خلاصه‌شده برای
+کانال تلگرام Gamefa تولید کنی.
 
-قوانین:
+مهم‌ترین قانون:
 
-1. خط اول فقط تیتر باشد.
+پاراگراف اول مقاله را کپی نکن.
 
-2. تیتر حتماً با کلمه یا عبارت فارسی شروع شود.
+حتی اگر پاراگراف اول خودش خلاصه خبر باشد،
+نباید همان متن را عیناً یا با تغییرات جزئی بازنویسی کنی.
 
-3. نام انگلیسی نباید اولین عبارت تیتر باشد.
+باید کل ARTICLE را بخوانی و اطلاعات مهم چند بخش
+مختلف مقاله را با هم ترکیب کنی.
+
+==================================================
+قوانین خلاصه‌سازی
+==================================================
+
+1. کل مقاله را بررسی کن.
+
+2. فقط پاراگراف اول را مبنا قرار نده.
+
+3. اگر مقاله اطلاعات کافی دارد، از اطلاعات
+   حداقل 2 تا 4 بخش مختلف مقاله استفاده کن.
+
+4. اطلاعات تکراری را حذف کن.
+
+5. جزئیات غیرضروری را حذف کن.
+
+6. اصل خبر و مهم‌ترین جزئیات را حفظ کن.
+
+7. متن نهایی باید جمله‌بندی کاملاً جدید داشته باشد.
+
+8. هیچ جمله‌ای را عیناً از مقاله کپی نکن.
+
+9. متن نهایی معمولاً حدود 100 تا 160 کلمه باشد.
+
+10. اگر مقاله کوتاه است، خلاصه نیز کوتاه‌تر باشد.
+
+11. اگر مقاله بسیار طولانی است، فقط مهم‌ترین
+    اطلاعات را انتخاب کن.
+
+==================================================
+قوانین تیتر
+==================================================
+
+12. خط اول فقط تیتر باشد.
+
+13. تیتر حتماً با فارسی شروع شود.
 
 مثال غلط:
-Netflix نسخه آمریکایی Squid Game را لغو کرد
+
+GTA 6 دوباره خبرساز شد
 
 مثال درست:
-نتفلیکس نسخه آمریکایی Squid Game را لغو کرد
 
-4. متن کاملاً فارسی و روان باشد.
+بازی GTA 6 دوباره خبرساز شد
 
-5. متن خبر فقط یک پاراگراف باشد.
+==================================================
+قوانین متن
+==================================================
 
-6. متن را در حدود 7 خط قابل‌خواندن تنظیم کن،
-اما پاراگراف را به چند بند جدا تقسیم نکن.
+14. متن خبر فقط یک پاراگراف باشد.
 
-7. اولین کلمه متن خبر باید فارسی باشد.
+15. متن خبر حتماً با فارسی شروع شود.
 
-8. اگر جمله با نام انگلیسی شروع می‌شود،
-قبل از آن عبارت فارسی طبیعی قرار بده.
+16. نام بازی‌ها، فیلم‌ها، شرکت‌ها و افراد
+    را در متن حفظ کن.
 
-مثال غلط:
-Brad Pitt در مصاحبه جدید...
+17. متن فارسی و روان باشد.
 
-مثال درست:
-برد پیت در مصاحبه جدید...
+18. اطلاعات ساختگی اضافه نکن.
 
-یا:
-براساس گزارش‌ها، Brad Pitt در مصاحبه جدید...
+19. هیچ لینک تولید نکن.
 
-9. نام‌های انگلیسی مانند نام بازی، فیلم،
-شرکت و شخص را درون جمله حفظ کن.
+20. هیچ منبع تولید نکن.
 
-10. اطلاعات ساختگی اضافه نکن.
+21. هیچ هشتگ تولید نکن.
 
-11. هیچ لینک، منبع یا آیدی کانال تولید نکن.
+22. هیچ آیدی کانال تولید نکن.
 
-12. Markdown تولید نکن.
+23. ایموجی تولید نکن.
 
-13. HTML تولید نکن.
+24. Markdown تولید نکن.
 
-14. ایموجی تولید نکن.
+25. HTML تولید نکن.
 
-15. خروجی فقط تیتر و متن خبر باشد.
+==================================================
+فرمت خروجی
+==================================================
 
-16. تیتر باید با فارسی شروع شود.
+فقط دو بخش تولید کن:
 
-17. متن خبر باید با فارسی شروع شود.
+خط اول:
+تیتر
+
+خطوط بعد:
+یک پاراگراف خلاصه‌شده
+
+هیچ توضیح دیگری اضافه نکن.
+
+==================================================
+اطلاعات مقاله
+==================================================
+
+TITLE:
+{title}
+
+DESCRIPTION:
+{description}
+
+ARTICLE:
+{body}
 """
 
 
-async def generate_news(source):
+# ============================================================
+# AI
+# ============================================================
+
+async def generate_news(
+    article
+):
 
     if not OPENAI_API_KEY:
 
@@ -831,24 +1045,53 @@ async def generate_news(source):
         api_key=OPENAI_API_KEY
     )
 
-    response = await client.responses.create(
-        model=MODEL,
-        instructions=PROMPT,
-        input=source,
-        max_output_tokens=1400
+    prompt = PROMPT.format(
+        title=article.get(
+            "title",
+            ""
+        ),
+        description=article.get(
+            "description",
+            ""
+        ),
+        body=article.get(
+            "body",
+            ""
+        )
     )
 
-    return (
+    response = await client.responses.create(
+        model=MODEL,
+
+        instructions=(
+            "کل مقاله را بخوان. "
+            "پاراگراف اول را کپی نکن. "
+            "از چند بخش مختلف مقاله اطلاعات استخراج کن "
+            "و یک خلاصه جدید بساز. "
+            "خروجی باید خلاصه واقعی باشد، نه کپی "
+            "یا بازنویسی نزدیک پاراگراف اول."
+        ),
+
+        input=prompt,
+
+        max_output_tokens=1200
+    )
+
+    result = (
         response.output_text
         or ""
     ).strip()
+
+    return result
 
 
 # ============================================================
 # IMAGE DOWNLOAD
 # ============================================================
 
-async def download_image(url):
+async def download_image(
+    url
+):
 
     if not url:
         return None
@@ -878,10 +1121,12 @@ async def download_image(url):
                     return None
 
                 content_type = (
-                    response.headers.get(
+                    response.headers
+                    .get(
                         "Content-Type",
                         ""
-                    ).lower()
+                    )
+                    .lower()
                 )
 
                 if "image" not in content_type:
@@ -944,7 +1189,7 @@ async def find_best_image(
     if not source_image:
 
         log.info(
-            "Article has no image. Text only."
+            "Article has no image."
         )
 
         return None
@@ -961,24 +1206,12 @@ async def find_best_image(
 
         return image_path
 
-    log.info(
-        "Source image unavailable. Text only."
-    )
-
     return None
 
 
 # ============================================================
 # MAIN MENU
-# ============================================================
-#
-# فقط 4 گزینه:
-#
-# 1. بررسی خبر جدید
-# 2. مشاهده و مدیریت آرشیو
-# 3. تنظیمات سیستم
-# 4. پاکسازی کامل آرشیو
-#
+# فقط 4 دکمه
 # ============================================================
 
 def main_menu():
@@ -991,6 +1224,7 @@ def main_menu():
                     text="🔎 بررسی خبر جدید",
                     callback_data="news_new"
                 ),
+
                 InlineKeyboardButton(
                     text="📁 مشاهده و مدیریت آرشیو",
                     callback_data="archive"
@@ -1002,6 +1236,7 @@ def main_menu():
                     text="⚙️ تنظیمات سیستم",
                     callback_data="settings"
                 ),
+
                 InlineKeyboardButton(
                     text="🗑 پاکسازی کامل آرشیو",
                     callback_data="clear_confirm"
@@ -1013,10 +1248,7 @@ def main_menu():
 
 # ============================================================
 # NEWS MENU
-# ============================================================
-#
-# فقط گزینه‌های ضروری
-#
+# فقط ورودی خبر
 # ============================================================
 
 def news_menu():
@@ -1029,6 +1261,7 @@ def news_menu():
                     text="📝 ارسال متن خبر",
                     callback_data="news_text"
                 ),
+
                 InlineKeyboardButton(
                     text="🔗 ارسال لینک Gamefa",
                     callback_data="news_link"
@@ -1063,13 +1296,6 @@ def archive_menu():
 
             [
                 InlineKeyboardButton(
-                    text="🗑 پاکسازی آرشیو",
-                    callback_data="clear_confirm"
-                )
-            ],
-
-            [
-                InlineKeyboardButton(
                     text="🔙 بازگشت",
                     callback_data="home"
                 )
@@ -1092,6 +1318,7 @@ def settings_menu():
                     text="📢 کانال انتشار",
                     callback_data="setting_channel"
                 ),
+
                 InlineKeyboardButton(
                     text="🧠 مدل AI",
                     callback_data="setting_model"
@@ -1103,6 +1330,7 @@ def settings_menu():
                     text="🖼 حالت تصویر",
                     callback_data="setting_image"
                 ),
+
                 InlineKeyboardButton(
                     text="✍️ قالب خبر",
                     callback_data="setting_format"
@@ -1133,6 +1361,7 @@ def clear_confirm_menu():
                     text="⚠️ بله، پاک کن",
                     callback_data="clear_yes"
                 ),
+
                 InlineKeyboardButton(
                     text="❌ لغو",
                     callback_data="home"
@@ -1170,7 +1399,11 @@ async def process_news(
     text
 ):
 
-    user_id = message.from_user.id
+    user_id = (
+        message.from_user.id
+        if message.from_user
+        else 0
+    )
 
     if user_id in processing_users:
 
@@ -1192,20 +1425,14 @@ async def process_news(
 
         source_image = ""
 
-        article_title = ""
-
-        article_body = ""
-
-        source = text
-
         # ====================================================
-        # GAMEFA URL
+        # GAMEFA LINK
         # ====================================================
 
         if url:
 
             status = await message.answer(
-                "⏳ در حال دریافت اطلاعات خبر از Gamefa..."
+                "⏳ در حال دریافت کل مقاله Gamefa..."
             )
 
             try:
@@ -1217,8 +1444,8 @@ async def process_news(
             except Exception as error:
 
                 await status.edit_text(
-                    "❌ خطا در دریافت مقاله:\n\n"
-                    + str(error)[:1500],
+                    "❌ دریافت مقاله ناموفق بود.\n\n"
+                    + str(error)[:1200],
                     reply_markup=main_menu()
                 )
 
@@ -1229,53 +1456,91 @@ async def process_news(
                 ""
             )
 
-            article_title = article.get(
-                "title",
-                ""
-            )
-
-            article_body = article.get(
-                "body",
-                ""
-            )
-
-            source = (
-                "TITLE:\n"
-                + article_title
-                + "\n\n"
-                "DESCRIPTION:\n"
-                + article.get(
-                    "description",
+            log.info(
+                "Gamefa title: %s",
+                article.get(
+                    "title",
                     ""
                 )
-                + "\n\n"
-                "ARTICLE:\n"
-                + article_body
             )
+
+            log.info(
+                "Article body chars: %d",
+                len(
+                    article.get(
+                        "body",
+                        ""
+                    )
+                )
+            )
+
+            # =================================================
+            # DUPLICATE
+            # =================================================
+
+            duplicate_source = (
+                article.get(
+                    "title",
+                    ""
+                )
+                + "\n"
+                + article.get(
+                    "body",
+                    ""
+                )
+            )
+
+            if duplicate(
+                duplicate_source
+            ):
+
+                await status.edit_text(
+                    "⚠️ این خبر یا یک خبر بسیار مشابه "
+                    "قبلاً در آرشیو وجود دارد.",
+                    reply_markup=main_menu()
+                )
+
+                return
 
             try:
 
                 await status.edit_text(
-                    "✍️ اطلاعات خبر دریافت شد.\n"
-                    "در حال آماده‌سازی متن..."
+                    "✍️ کل مقاله دریافت شد.\n"
+                    "🧠 در حال خلاصه‌سازی با هوش مصنوعی..."
                 )
 
             except Exception:
                 pass
 
         # ====================================================
-        # DUPLICATE
+        # RAW TEXT
         # ====================================================
 
-        if duplicate(source):
+        else:
 
-            await message.answer(
-                "⚠️ این خبر یا یک خبر بسیار مشابه قبلاً "
-                "در آرشیو وجود دارد.",
-                reply_markup=main_menu()
+            article = {
+                "url": "",
+                "title": "",
+                "description": "",
+                "body": text,
+                "image": ""
+            }
+
+            if duplicate(
+                text
+            ):
+
+                await message.answer(
+                    "⚠️ این خبر یا یک خبر بسیار مشابه "
+                    "قبلاً در آرشیو وجود دارد.",
+                    reply_markup=main_menu()
+                )
+
+                return
+
+            status = await message.answer(
+                "🧠 در حال خلاصه‌سازی خبر..."
             )
-
-            return
 
         # ====================================================
         # AI
@@ -1284,18 +1549,36 @@ async def process_news(
         try:
 
             generated = await generate_news(
-                source
+                article
             )
 
         except Exception as error:
 
-            await message.answer(
-                "❌ خطا در پردازش هوش مصنوعی:\n\n"
-                + str(error)[:1500],
-                reply_markup=main_menu()
+            log.exception(
+                "AI generation error"
             )
 
+            try:
+
+                await status.edit_text(
+                    "❌ خطا در تولید خبر:\n\n"
+                    + str(error)[:1500],
+                    reply_markup=main_menu()
+                )
+
+            except Exception:
+
+                await message.answer(
+                    "❌ خطا در تولید خبر:\n\n"
+                    + str(error)[:1500],
+                    reply_markup=main_menu()
+                )
+
             return
+
+        # ====================================================
+        # FORMAT
+        # ====================================================
 
         post = format_post(
             generated
@@ -1319,9 +1602,21 @@ async def process_news(
         # MEMORY
         # ====================================================
 
+        memory_source = (
+            article.get(
+                "title",
+                ""
+            )
+            + "\n"
+            + article.get(
+                "body",
+                ""
+            )
+        )
+
         memory.append(
             {
-                "source": source[:16000],
+                "source": memory_source[:30000],
                 "post": post,
                 "url": url or ""
             }
@@ -1343,12 +1638,18 @@ async def process_news(
         }
 
         # ====================================================
-        # AUTOMATIC PREVIEW
+        # STATUS DELETE
         # ====================================================
-        #
-        # چون دکمه مشاهده پیش‌نمایش حذف شده،
-        # خبر بلافاصله بعد از آماده‌شدن نمایش داده می‌شود.
-        #
+
+        try:
+
+            await status.delete()
+
+        except Exception:
+            pass
+
+        # ====================================================
+        # PREVIEW
         # ====================================================
 
         if image_path:
@@ -1383,13 +1684,12 @@ async def process_news(
             )
 
         # ====================================================
-        # READY MESSAGE
+        # AUTO PUBLISH
         # ====================================================
 
-        await message.answer(
-            "✅ خبر آماده انتشار است.\n\n"
-            "برای انتشار می‌توانی از دستور /publish استفاده کنی.",
-            reply_markup=main_menu()
+        await publish_news(
+            message,
+            user_id
         )
 
     except Exception as error:
@@ -1422,12 +1722,16 @@ router = Router()
 # START
 # ============================================================
 
-@router.message(Command("start"))
+@router.message(
+    Command("start")
+)
 async def start_handler(
     message: Message
 ):
 
-    if not is_admin(message):
+    if not is_admin(
+        message
+    ):
 
         await message.answer(
             "⛔ این ربات خصوصی است."
@@ -1498,35 +1802,26 @@ async def callback_handler(
 
         return
 
-    # ========================================================
-    # NEWS TEXT
-    # ========================================================
-
     if data == "news_text":
 
         await callback.message.edit_text(
             "📝 <b>ارسال متن خبر</b>\n\n"
             "متن خبر را همین‌جا ارسال کن.\n\n"
-            "ربات متن را با AI ویرایش کرده و "
-            "بعد از آماده‌شدن، پیش‌نمایش را "
-            "به‌صورت خودکار نمایش می‌دهد.",
+            "ربات آن را خلاصه و برای انتشار آماده می‌کند.",
             parse_mode=ParseMode.HTML,
             reply_markup=back_menu()
         )
 
         return
 
-    # ========================================================
-    # NEWS LINK
-    # ========================================================
-
     if data == "news_link":
 
         await callback.message.edit_text(
             "🔗 <b>ارسال لینک Gamefa</b>\n\n"
             "لینک مقاله Gamefa را ارسال کن.\n\n"
-            "اطلاعات مقاله و تصویر اصلی آن "
-            "در صورت وجود دریافت می‌شود.",
+            "ربات کل مقاله را دریافت می‌کند، "
+            "آن را با هوش مصنوعی خلاصه می‌کند "
+            "و تصویر اصلی مقاله را در صورت وجود استفاده می‌کند.",
             parse_mode=ParseMode.HTML,
             reply_markup=back_menu()
         )
@@ -1548,10 +1843,6 @@ async def callback_handler(
 
         return
 
-    # ========================================================
-    # ARCHIVE LATEST
-    # ========================================================
-
     if data == "archive_latest":
 
         if not memory:
@@ -1565,7 +1856,8 @@ async def callback_handler(
             latest = memory[-10:]
 
             lines = [
-                "📚 <b>آخرین اخبار آرشیو</b>\n"
+                "📚 <b>آخرین اخبار آرشیو</b>",
+                ""
             ]
 
             for index, item in enumerate(
@@ -1591,7 +1883,8 @@ async def callback_handler(
                 )
 
                 lines.append(
-                    f"{index}. {first_line[:100]}"
+                    f"{index}. "
+                    f"{first_line[:100]}"
                 )
 
             text = "\n".join(
@@ -1621,10 +1914,6 @@ async def callback_handler(
 
         return
 
-    # ========================================================
-    # CHANNEL
-    # ========================================================
-
     if data == "setting_channel":
 
         await callback.message.edit_text(
@@ -1637,10 +1926,6 @@ async def callback_handler(
 
         return
 
-    # ========================================================
-    # MODEL
-    # ========================================================
-
     if data == "setting_model":
 
         await callback.message.edit_text(
@@ -1652,27 +1937,19 @@ async def callback_handler(
 
         return
 
-    # ========================================================
-    # IMAGE
-    # ========================================================
-
     if data == "setting_image":
 
         await callback.message.edit_text(
             "🖼 <b>سیستم تصویر</b>\n\n"
-            "حالت فعلی:\n"
-            "✅ فقط تصویر اصلی مقاله\n\n"
+            "حالت فعلی:\n\n"
+            "✅ تصویر اصلی مقاله Gamefa\n\n"
             "اگر مقاله تصویر نداشته باشد، "
-            "ربات تصویر تصادفی از اینترنت انتخاب نمی‌کند.",
+            "تصویر تصادفی از اینترنت انتخاب نمی‌شود.",
             parse_mode=ParseMode.HTML,
             reply_markup=back_menu()
         )
 
         return
-
-    # ========================================================
-    # FORMAT
-    # ========================================================
 
     if data == "setting_format":
 
@@ -1680,10 +1957,11 @@ async def callback_handler(
             "✍️ <b>قالب خبر</b>\n\n"
             "• تیتر فارسی\n"
             "• شروع فارسی متن\n"
+            "• خلاصه واقعی\n"
             "• یک پاراگراف\n"
-            "• متن روان خبری\n"
-            "• امضای Gamefa\n"
-            "• دسته‌بندی خودکار",
+            "• حذف اطلاعات اضافی\n"
+            "• دسته‌بندی خودکار\n"
+            "• امضای Gamefa",
             parse_mode=ParseMode.HTML,
             reply_markup=back_menu()
         )
@@ -1706,10 +1984,6 @@ async def callback_handler(
 
         return
 
-    # ========================================================
-    # CLEAR YES
-    # ========================================================
-
     if data == "clear_yes":
 
         memory.clear()
@@ -1729,7 +2003,7 @@ async def callback_handler(
 
 
 # ============================================================
-# PUBLISH FUNCTION
+# PUBLISH
 # ============================================================
 
 async def publish_news(
@@ -1835,12 +2109,16 @@ async def publish_news(
 # COMMAND: PUBLISH
 # ============================================================
 
-@router.message(Command("publish"))
+@router.message(
+    Command("publish")
+)
 async def publish_command(
     message: Message
 ):
 
-    if not is_admin(message):
+    if not is_admin(
+        message
+    ):
         return
 
     await publish_news(
@@ -1852,18 +2130,17 @@ async def publish_command(
 # ============================================================
 # COMMAND: STATS
 # ============================================================
-#
-# دکمه آمار حذف شده،
-# اما دستور برای مواقع ضروری باقی مانده است.
-#
-# ============================================================
 
-@router.message(Command("stats"))
+@router.message(
+    Command("stats")
+)
 async def stats_command(
     message: Message
 ):
 
-    if not is_admin(message):
+    if not is_admin(
+        message
+    ):
         return
 
     await message.answer(
@@ -1877,12 +2154,16 @@ async def stats_command(
 # COMMAND: CLEAR
 # ============================================================
 
-@router.message(Command("clear"))
+@router.message(
+    Command("clear")
+)
 async def clear_command(
     message: Message
 ):
 
-    if not is_admin(message):
+    if not is_admin(
+        message
+    ):
         return
 
     memory.clear()
@@ -1901,12 +2182,16 @@ async def clear_command(
 # TEXT MESSAGE
 # ============================================================
 
-@router.message(F.text)
+@router.message(
+    F.text
+)
 async def text_handler(
     message: Message
 ):
 
-    if not is_admin(message):
+    if not is_admin(
+        message
+    ):
         return
 
     text = (
@@ -1916,7 +2201,6 @@ async def text_handler(
     if not text:
         return
 
-    # دستورات قبلاً مدیریت شده‌اند
     if text.startswith("/"):
         return
 
@@ -1932,19 +2216,11 @@ async def text_handler(
 
 async def main():
 
-    # ========================================================
-    # CHECK BOT TOKEN
-    # ========================================================
-
     if not BOT_TOKEN:
 
         raise RuntimeError(
             "BOT_TOKEN تنظیم نشده است."
         )
-
-    # ========================================================
-    # CHECK OPENAI
-    # ========================================================
 
     if not OPENAI_API_KEY:
 
@@ -1952,25 +2228,13 @@ async def main():
             "OPENAI_API_KEY تنظیم نشده است."
         )
 
-    # ========================================================
-    # CHECK ADMIN
-    # ========================================================
-
     if not ADMIN_ID:
 
         raise RuntimeError(
             "ADMIN_ID تنظیم نشده است."
         )
 
-    # ========================================================
-    # LOAD MEMORY
-    # ========================================================
-
     load_memory()
-
-    # ========================================================
-    # BOT
-    # ========================================================
 
     bot = Bot(
         token=BOT_TOKEN
@@ -1981,10 +2245,6 @@ async def main():
     dispatcher.include_router(
         router
     )
-
-    # ========================================================
-    # LOG
-    # ========================================================
 
     log.info(
         "========================================"
@@ -2010,7 +2270,7 @@ async def main():
     )
 
     log.info(
-        "Memory: %s news",
+        "Memory: %d news",
         len(memory)
     )
 
@@ -2018,13 +2278,11 @@ async def main():
         "========================================"
     )
 
-    # ========================================================
-    # POLLING
-    # ========================================================
-
     await dispatcher.start_polling(
         bot,
-        allowed_updates=dispatcher.resolve_used_update_types()
+        allowed_updates=(
+            dispatcher.resolve_used_update_types()
+        )
     )
 
 
