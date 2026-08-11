@@ -16,9 +16,8 @@ from aiogram.filters import Command
 from aiogram.types import (
     Message,
     FSInputFile,
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
 )
 
 from openai import AsyncOpenAI
@@ -58,6 +57,9 @@ memory = []
 prepared = {}
 
 processing_users = set()
+
+# حالت فعلی منوی هر کاربر
+user_modes = {}
 
 
 # ============================================================
@@ -241,7 +243,7 @@ def starts_with_persian(text):
     clean = text.strip()
 
     clean = re.sub(
-        r"^[🎮🎬📱🟣📢\s]+",
+        r"^[🎮🎬📱🟣📢📰\s]+",
         "",
         clean
     )
@@ -349,7 +351,7 @@ def clean_ai_text(text):
 
     text = text or ""
 
-    # Markdown
+    # Markdown bold
     text = re.sub(
         r"\*\*(.*?)\*\*",
         r"\1",
@@ -371,6 +373,7 @@ def clean_ai_text(text):
         flags=re.S
     )
 
+    # Code
     text = re.sub(
         r"`(.*?)`",
         r"\1",
@@ -392,15 +395,81 @@ def clean_ai_text(text):
         text
     )
 
-    # Emojis at beginning
+    # Emojis at beginning of lines
     text = re.sub(
-        r"^\s*[🎮🎬📱📢🟣]\s*",
+        r"^\s*[🎮🎬📱📢🟣📰]\s*",
         "",
         text,
         flags=re.M
     )
 
     return text.strip()
+
+
+# ============================================================
+# SENTENCE NORMALIZER
+# ============================================================
+
+def normalize_news_body(text):
+    """
+    تمام خطوط خبر را به یک پاراگراف تبدیل می‌کند.
+
+    اگر AI هر جمله را در یک خط جدا بفرستد،
+    این تابع آن‌ها را با فاصله به هم متصل می‌کند.
+    """
+
+    if not text:
+        return ""
+
+    text = text.replace(
+        "\r\n",
+        "\n"
+    )
+
+    text = text.replace(
+        "\r",
+        "\n"
+    )
+
+    lines = []
+
+    for line in text.split("\n"):
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # حذف شماره‌گذاری
+        line = re.sub(
+            r"^\s*\d+[\.\)\-:]\s*",
+            "",
+            line
+        )
+
+        # حذف بولت
+        line = re.sub(
+            r"^\s*[•●▪️\-–—]\s*",
+            "",
+            line
+        )
+
+        line = line.strip()
+
+        if line:
+            lines.append(line)
+
+    # اتصال همه جمله‌ها به یک پاراگراف
+    result = " ".join(lines)
+
+    # حذف فاصله‌های اضافی
+    result = re.sub(
+        r"\s+",
+        " ",
+        result
+    )
+
+    return result.strip()
 
 
 # ============================================================
@@ -416,6 +485,10 @@ def format_post(ai_text):
     if not ai_text:
         return ""
 
+    # --------------------------------------------------------
+    # تبدیل خروجی AI به خطوط
+    # --------------------------------------------------------
+
     raw_lines = [
         line.strip()
         for line in ai_text.splitlines()
@@ -425,14 +498,14 @@ def format_post(ai_text):
     if not raw_lines:
         return ""
 
-    # ========================================================
+    # --------------------------------------------------------
     # TITLE
-    # ========================================================
+    # --------------------------------------------------------
 
     title = raw_lines[0]
 
     title = re.sub(
-        r"^[🎮🎬📱📢]\s*",
+        r"^[🎮🎬📱📢📰]\s*",
         "",
         title
     ).strip()
@@ -442,9 +515,9 @@ def format_post(ai_text):
         is_title=True
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # BODY
-    # ========================================================
+    # --------------------------------------------------------
 
     body_lines = raw_lines[1:]
 
@@ -470,26 +543,47 @@ def format_post(ai_text):
             line
         )
 
-    # ========================================================
-    # EXACTLY 7 CONTENT PARTS
-    # ========================================================
-
+    # حداکثر 7 جمله/خط AI
     body_parts = body_parts[:7]
+
+    # اگر AI کمتر داد
+    fallback_sentences = [
+        "جزئیات بیشتر این موضوع در گزارش اصلی ارائه شده است.",
+        "اطلاعات تکمیلی این خبر در منبع اصلی قابل بررسی است.",
+        "جزئیات بیشتری درباره این موضوع منتشر نشده است."
+    ]
+
+    fallback_index = 0
 
     while len(body_parts) < 7:
 
         body_parts.append(
-            "جزئیات بیشتر این موضوع در گزارش اصلی ارائه شده است."
+            fallback_sentences[
+                min(
+                    fallback_index,
+                    len(fallback_sentences) - 1
+                )
+            ]
         )
 
-    # ========================================================
+        fallback_index += 1
+
+    # --------------------------------------------------------
+    # تبدیل 7 جمله به یک پاراگراف
+    # --------------------------------------------------------
+
+    body = normalize_news_body(
+        "\n".join(body_parts)
+    )
+
+    # --------------------------------------------------------
     # CATEGORY
-    # ========================================================
+    # --------------------------------------------------------
 
     category = detect_category(
         title
         + " "
-        + " ".join(body_parts)
+        + body
     )
 
     title = (
@@ -498,41 +592,15 @@ def format_post(ai_text):
         + title
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # FINAL
-    # ========================================================
+    # --------------------------------------------------------
 
     result = (
         "<b>"
         + escape_html(title)
         + "</b>"
     )
-
-    # ========================================================
-    # مهم‌ترین تغییر:
-    #
-    # قبلاً:
-    #
-    # body = "\n".join(body_parts)
-    #
-    # همین باعث می‌شد بعد از هر جمله/خط Enter بخورد.
-    #
-    # اکنون:
-    # تمام بخش‌های خبر با فاصله به یک پاراگراف تبدیل می‌شوند.
-    # ========================================================
-
-    body = " ".join(
-        part.strip()
-        for part in body_parts
-        if part.strip()
-    )
-
-    # حذف فاصله‌های اضافی
-    body = re.sub(
-        r"\s+",
-        " ",
-        body
-    ).strip()
 
     result += (
         "\n\n🟣 "
@@ -750,7 +818,7 @@ async def fetch_gamefa(url):
         body_parts
     )
 
-    # حجم مناسب برای AI
+    # محدودیت برای ارسال به AI
     body = body[:50000]
 
     return {
@@ -769,88 +837,217 @@ async def fetch_gamefa(url):
 PROMPT = """
 تو یک سردبیر حرفه‌ای اخبار فارسی برای رسانه Gamefa هستی.
 
-وظیفه تو این است که مقاله ورودی را کامل بخوانی و از کل مقاله یک خبر فارسی دقیق، کوتاه و حرفه‌ای تولید کنی.
+وظیفه تو این است که کل مقاله را بخوانی، اطلاعات مهم آن را استخراج کنی و سپس یک خبر فارسی دقیق، طبیعی و حرفه‌ای تولید کنی.
 
-مهم‌ترین قانون:
+============================================================
+قانون بسیار مهم
+============================================================
 
-هرگز فقط بند اول مقاله را کپی یا بازنویسی نکن.
+هرگز فقط پاراگراف اول مقاله را خلاصه یا بازنویسی نکن.
 
-باید کل مقاله را تحلیل کنی و اطلاعات مهم را از بخش‌های مختلف آن استخراج کنی.
+قبل از تولید خروجی، باید کل مقاله را از ابتدا تا انتها بررسی کنی.
 
-1. خط اول خروجی فقط تیتر باشد.
+اطلاعات مهم را از بخش‌های مختلف مقاله استخراج کن.
 
-2. بعد از تیتر دقیقاً 7 خط خبر تولید کن.
+خبر نهایی باید حاصل تحلیل کل مقاله باشد، نه فقط پاراگراف اول.
 
-3. این 7 خط باید خلاصه واقعی کل مقاله باشند.
+============================================================
+اطلاعاتی که نباید حذف شوند
+============================================================
 
-4. هر خط باید اطلاعات مفید و متفاوتی داشته باشد.
+اگر مقاله شامل هرکدام از اطلاعات زیر است، باید مقدار دقیق آن‌ها را در خبر نهایی بیاوری:
 
-5. از کپی کردن جمله‌های مقاله خودداری کن.
+- تاریخ عرضه
+- تاریخ انتشار
+- تاریخ پیش‌دانلود
+- ساعت انتشار
+- ساعت پیش‌دانلود
+- حجم دانلود
+- حجم نصب
+- قیمت
+- نسخه‌های مختلف
+- نام نسخه‌ها
+- پلتفرم‌ها
+- مشخصات فنی
+- سیستم مورد نیاز
+- نام شرکت‌ها
+- نام استودیوها
+- نام توسعه‌دهندگان
+- نام ناشر
+- آمار
+- اعداد
+- زمان دسترسی زودهنگام
+- اطلاعات رسمی
+- اطلاعات فاش‌شده
+- شایعات
+- منبع خبر
 
-6. ساختار جمله‌ها را نیز تغییر بده.
+اگر چنین اطلاعاتی در مقاله وجود دارد، آن‌ها را با عبارت کلی جایگزین نکن.
 
-7. خبر باید حاصل تحلیل و بازنویسی کل مقاله باشد.
+مثلاً غلط:
 
-8. بند اول مقاله نباید بیش از سایر بخش‌ها مورد استفاده قرار بگیرد.
+«تاریخ عرضه بازی مشخص شده است.»
 
-9. اگر اطلاعات مهمی در بخش‌های میانی یا پایانی مقاله وجود دارد، حتماً در خلاصه لحاظ کن.
+درست:
 
-10. اطلاعات ساختگی اضافه نکن.
+«نسخه استاندارد بازی در تاریخ ۲۰ اوت ۲۰۲۶ عرضه خواهد شد.»
 
-قبل از نوشتن خروجی:
+مثلاً غلط:
 
-مرحله اول:
-کل مقاله را بخوان.
+«نسخه ویژه زودتر منتشر می‌شود.»
 
-مرحله دوم:
-نکات مهم مقاله را استخراج کن.
+درست:
 
-مرحله سوم:
-نکات تکراری و کم‌اهمیت را حذف کن.
+«نسخه Devout Edition در تاریخ ۱۷ اوت عرضه خواهد شد.»
 
-مرحله چهارم:
-مهم‌ترین اطلاعات را انتخاب کن.
+مثلاً غلط:
 
-مرحله پنجم:
-اطلاعات انتخاب‌شده را با زبان خبری فارسی بازنویسی کن.
+«پیش‌دانلود بازی چند روز زودتر آغاز می‌شود.»
 
-مرحله ششم:
-آن‌ها را در دقیقاً 7 خط قرار بده.
+درست:
 
-در صورت وجود اطلاعات کافی، این موارد را پوشش بده:
+«پیش‌دانلود نسخه استاندارد از ۱۸ اوت آغاز می‌شود.»
 
-خط 1:
+============================================================
+قانون تاریخ و عدد
+============================================================
+
+اگر مقاله دارای تاریخ یا عدد دقیق است، حتماً آن را در خروجی قرار بده.
+
+هرگز اطلاعات دقیق را به اطلاعات کلی تبدیل نکن.
+
+مثلاً:
+
+«در آینده عرضه می‌شود»
+
+به جای:
+
+«۲۰ اوت ۲۰۲۶ عرضه می‌شود»
+
+ممنوع است.
+
+همچنین:
+
+«حجم بازی بیش از ۳۲ گیگابایت است»
+
+اگر مقاله عدد دقیق دارد، نباید جایگزین عدد دقیق شود.
+
+============================================================
+اولویت اطلاعات
+============================================================
+
+اطلاعات را با این اولویت انتخاب کن:
+
+1. مهم‌ترین اتفاق خبر
+2. تاریخ و زمان دقیق
+3. اعداد و آمار مهم
+4. نسخه‌ها و تفاوت آن‌ها
+5. پلتفرم‌ها
+6. اطلاعات منبع خبر
+7. جزئیات مهم مقاله
+8. وضعیت فعلی و اتفاق آینده
+
+============================================================
+خروجی
+============================================================
+
+خروجی دقیقاً شامل:
+
+خط اول: تیتر
+
+خطوط دوم تا هشتم:
+7 جمله خبری
+
+یعنی:
+
+1 تیتر
+7 جمله خبری
+
+هیچ شماره‌گذاری نکن.
+
+هیچ بولتی استفاده نکن.
+
+هیچ Markdown استفاده نکن.
+
+هیچ HTML استفاده نکن.
+
+هیچ ایموجی استفاده نکن.
+
+هیچ لینک تولید نکن.
+
+آیدی کانال تولید نکن.
+
+============================================================
+قانون بسیار مهم برای متن
+============================================================
+
+هر 7 جمله باید اطلاعات متفاوت و مفید داشته باشند.
+
+جملات نباید تکراری باشند.
+
+از تکرار عبارت‌هایی مثل:
+
+«براساس گزارش‌های منتشرشده»
+«طبق گزارش‌ها»
+«این اطلاعات»
+«در این گزارش»
+
+به شکل مداوم خودداری کن.
+
+متن باید شبیه خبر واقعی یک رسانه فارسی باشد.
+
+============================================================
+قانون پوشش کل مقاله
+============================================================
+
+حتماً بخش‌های میانی و پایانی مقاله را هم بررسی کن.
+
+اگر اطلاعات مهم در انتهای مقاله آمده باشد، آن اطلاعات را حذف نکن.
+
+پاراگراف اول مقاله نباید سهم بیشتری از سایر بخش‌ها داشته باشد.
+
+اگر مقاله درباره یک بازی است و در بخش‌های مختلف مقاله تاریخ عرضه، حجم، نسخه‌ها، پیش‌دانلود و پلتفرم‌ها ذکر شده‌اند، همه اطلاعات مهم را در 7 جمله ترکیب کن.
+
+============================================================
+ساختار پیشنهادی
+============================================================
+
+جمله اول:
 مهم‌ترین اتفاق خبر.
 
-خط 2:
-جزئیات اصلی اتفاق.
+جمله دوم:
+مهم‌ترین تاریخ، عدد، حجم، قیمت یا زمان دقیق.
 
-خط 3:
-اطلاعات مربوط به بازی، فیلم، سریال، شرکت یا شخص مرتبط.
+جمله سوم:
+جزئیات نسخه‌ها یا پلتفرم‌ها.
 
-خط 4:
-جزئیات مهم دیگری که در بخش‌های دیگر مقاله آمده است.
+جمله چهارم:
+یک اطلاعات مهم از بخش میانی مقاله.
 
-خط 5:
-تاریخ، پلتفرم، وضعیت پروژه یا اطلاعات مشابه.
+جمله پنجم:
+تاریخ عرضه، پیش‌دانلود یا دسترسی زودهنگام، در صورت وجود.
 
-خط 6:
-یک نکته مهم دیگر از مقاله.
+جمله ششم:
+یک جزئیات مهم دیگر از مقاله.
 
-خط 7:
-وضعیت فعلی، نتیجه یا اتفاق آینده.
+جمله هفتم:
+جمع‌بندی وضعیت فعلی و اتفاق آینده.
 
-این ساختار اجباری نیست و در صورت تفاوت موضوع، ترتیب را منطقی کن.
+این ساختار انعطاف‌پذیر است، اما اطلاعات مهم مقاله نباید حذف شوند.
 
-این موارد ممنوع هستند:
+============================================================
+قانون شایعه و گزارش
+============================================================
 
-- کپی مستقیم بند اول
-- کپی چند جمله از مقاله
-- تغییر چند کلمه از جمله اصلی
-- خلاصه کردن فقط پاراگراف اول
-- استفاده از همان ترتیب جمله‌های مقاله
+اگر اطلاعات توسط یک منبع یا دیتابیس فاش شده، آن را به عنوان اطلاعات فاش‌شده معرفی کن.
 
-خبر باید از ترکیب اطلاعات کل مقاله ساخته شود.
+اگر سازنده یا ناشر آن را رسماً اعلام کرده، آن را رسمی معرفی کن.
+
+اگر اطلاعات شایعه است، آن را رسمی جلوه نده.
+
+============================================================
+قانون تیتر
+============================================================
 
 تیتر باید:
 
@@ -858,27 +1055,27 @@ PROMPT = """
 - خبری باشد
 - جذاب باشد
 - مهم‌ترین اتفاق را منتقل کند
-- با فارسی شروع شود
+- با متن فارسی شروع شود
 
-مثال غلط:
+مثال:
 
-Netflix announces new season...
+حجم و زمان پیش‌دانلود Mortal Shell 2 برای PS5 فاش شد
 
-مثال درست:
+============================================================
+قانون زبان
+============================================================
 
-نتفلیکس فصل جدید Squid Game را معرفی کرد
+فارسی روان و طبیعی بنویس.
 
-متن فارسی روان و طبیعی باشد.
+نام بازی‌ها، شرکت‌ها، افراد و اصطلاحات مهم انگلیسی را حفظ کن.
 
-نام‌های انگلیسی مهم را حفظ کن.
+اگر جمله با نام انگلیسی شروع می‌شود، یک عبارت فارسی مناسب قبل از آن قرار بده.
 
-اگر جمله با نام انگلیسی شروع می‌شود، قبل از آن عبارت فارسی مناسب قرار بده.
-
-مثال غلط:
+غلط:
 
 Brad Pitt در فیلم جدید...
 
-مثال درست:
+درست:
 
 برد پیت در فیلم جدید...
 
@@ -886,50 +1083,28 @@ Brad Pitt در فیلم جدید...
 
 براساس گزارش جدید، Brad Pitt در فیلم جدید...
 
-خروجی دقیقاً به شکل زیر باشد:
+============================================================
+قانون نهایی
+============================================================
 
-خط اول = تیتر
+قبل از تولید خروجی:
 
-خط دوم = خبر
-خط سوم = خبر
-خط چهارم = خبر
-خط پنجم = خبر
-خط ششم = خبر
-خط هفتم = خبر
-خط هشتم = خبر
+1. کل مقاله را بخوان.
+2. تمام تاریخ‌ها را استخراج کن.
+3. تمام ساعت‌ها را استخراج کن.
+4. تمام اعداد مهم را استخراج کن.
+5. تمام نسخه‌ها را استخراج کن.
+6. تمام پلتفرم‌ها را استخراج کن.
+7. اطلاعات بخش میانی را بررسی کن.
+8. اطلاعات بخش پایانی را بررسی کن.
+9. اطلاعات مهم را اولویت‌بندی کن.
+10. سپس تیتر و 7 جمله خبری بنویس.
 
-یعنی:
-
-1 تیتر
-7 خط خبر
-
-هیچ خط خالی بین 7 خط خبر قرار نده.
-
-شماره‌گذاری نکن.
-
-بولت استفاده نکن.
-
-Markdown استفاده نکن.
-
-HTML استفاده نکن.
-
-ایموجی استفاده نکن.
-
-لینک تولید نکن.
-
-آیدی کانال تولید نکن.
+اگر چند تاریخ یا عدد مهم وجود دارد، آن‌ها را در یک جمله طبیعی با هم ترکیب کن.
 
 هیچ اطلاعاتی را حدس نزن.
 
-هیچ تاریخ، عدد، نام، شرکت یا پلتفرمی را بدون وجود در مقاله اضافه نکن.
-
-اگر خبر درباره شایعه است، آن را به عنوان شایعه بیان کن.
-
-اگر چیزی رسماً تأیید شده، آن را به عنوان تأیید رسمی بیان کن.
-
-تفاوت بین شایعه، گزارش و تأیید رسمی را حفظ کن.
-
-اکنون کل مقاله را تحلیل کن و خبر را دقیقاً طبق قوانین بالا تولید کن.
+اکنون کل مقاله را تحلیل کن و خروجی را تولید کن.
 """
 
 
@@ -949,10 +1124,18 @@ async def generate_news(source):
     )
 
     input_text = (
-        "مقاله زیر را کامل بخوان و تحلیل کن.\n\n"
-        "هرگز فقط بند اول را خلاصه نکن.\n"
+        "مقاله زیر را از ابتدا تا انتها کامل بخوان.\n\n"
+        "مهم: قبل از نوشتن خبر، تاریخ‌ها، ساعت‌ها، حجم‌ها، "
+        "قیمت‌ها، نسخه‌ها، پلتفرم‌ها و سایر اعداد مهم مقاله "
+        "را شناسایی کن.\n\n"
+        "اگر مقاله تاریخ عرضه یا پیش‌دانلود دارد، تاریخ دقیق "
+        "را حتماً در خروجی بیاور و آن را با عبارت کلی مانند "
+        "«به‌زودی» جایگزین نکن.\n\n"
+        "اگر مقاله چند نسخه یا چند تاریخ دارد، مهم‌ترین آن‌ها "
+        "را در یک یا چند جمله از 7 جمله خبری قرار بده.\n\n"
+        "هرگز فقط پاراگراف اول مقاله را خلاصه نکن.\n"
         "اطلاعات را از کل مقاله استخراج کن.\n"
-        "خروجی باید یک تیتر و دقیقاً 7 خط خبر باشد.\n\n"
+        "خروجی باید یک تیتر و دقیقاً 7 جمله خبری باشد.\n\n"
         "================ ARTICLE ================\n"
         + source
         + "\n\n"
@@ -1079,208 +1262,180 @@ async def find_best_image(
 
 
 # ============================================================
-# MAIN MENU
+# REPLY KEYBOARDS
 # ============================================================
 
 def main_menu():
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-
+    return ReplyKeyboardMarkup(
+        keyboard=[
             [
-                InlineKeyboardButton(
-                    text="🔎 بررسی خبر جدید",
-                    callback_data="news_new"
-                )
-            ],
-
-            [
-                InlineKeyboardButton(
-                    text="📁 آرشیو",
-                    callback_data="archive"
+                KeyboardButton(
+                    text="🔎 بررسی خبر جدید"
                 ),
-                InlineKeyboardButton(
-                    text="📊 آمار",
-                    callback_data="stats"
+                KeyboardButton(
+                    text="📁 آرشیو"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="🤖 وضعیت AI",
-                    callback_data="ai_status"
+                KeyboardButton(
+                    text="📊 آمار"
                 ),
-                InlineKeyboardButton(
-                    text="⚙️ تنظیمات",
-                    callback_data="settings"
+                KeyboardButton(
+                    text="🤖 وضعیت AI"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="📋 راهنما",
-                    callback_data="help"
+                KeyboardButton(
+                    text="⚙️ تنظیمات"
+                ),
+                KeyboardButton(
+                    text="📋 راهنما"
                 )
             ]
-        ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
     )
 
-
-# ============================================================
-# NEWS MENU
-# ============================================================
 
 def news_menu():
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-
+    return ReplyKeyboardMarkup(
+        keyboard=[
             [
-                InlineKeyboardButton(
-                    text="📝 ارسال خبر",
-                    callback_data="news_text"
+                KeyboardButton(
+                    text="📝 ارسال خبر"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="🔗 ارسال لینک Gamefa",
-                    callback_data="news_link"
+                KeyboardButton(
+                    text="🔗 ارسال لینک Gamefa"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="🔙 بازگشت",
-                    callback_data="home"
+                KeyboardButton(
+                    text="🔙 بازگشت"
                 )
             ]
-        ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
     )
 
-
-# ============================================================
-# ARCHIVE MENU
-# ============================================================
 
 def archive_menu():
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-
+    return ReplyKeyboardMarkup(
+        keyboard=[
             [
-                InlineKeyboardButton(
-                    text="📚 آخرین اخبار",
-                    callback_data="archive_latest"
+                KeyboardButton(
+                    text="📚 آخرین اخبار"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="🗑 پاکسازی آرشیو",
-                    callback_data="clear_confirm"
+                KeyboardButton(
+                    text="🗑 پاکسازی آرشیو"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="🔙 بازگشت",
-                    callback_data="home"
+                KeyboardButton(
+                    text="🔙 بازگشت"
                 )
             ]
-        ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
     )
 
-
-# ============================================================
-# SETTINGS MENU
-# ============================================================
 
 def settings_menu():
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-
+    return ReplyKeyboardMarkup(
+        keyboard=[
             [
-                InlineKeyboardButton(
-                    text="📢 کانال انتشار",
-                    callback_data="setting_channel"
+                KeyboardButton(
+                    text="📢 کانال انتشار"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="🧠 مدل AI",
-                    callback_data="setting_model"
+                KeyboardButton(
+                    text="🧠 مدل AI"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="🖼 سیستم تصویر",
-                    callback_data="setting_image"
+                KeyboardButton(
+                    text="🖼 سیستم تصویر"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="✍️ قالب خبر",
-                    callback_data="setting_format"
+                KeyboardButton(
+                    text="✍️ قالب خبر"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="🔙 بازگشت",
-                    callback_data="home"
+                KeyboardButton(
+                    text="🔙 بازگشت"
                 )
             ]
-        ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
     )
 
-
-# ============================================================
-# CONFIRM CLEAR
-# ============================================================
 
 def clear_confirm_menu():
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-
+    return ReplyKeyboardMarkup(
+        keyboard=[
             [
-                InlineKeyboardButton(
-                    text="⚠️ بله، پاک کن",
-                    callback_data="clear_yes"
+                KeyboardButton(
+                    text="⚠️ بله، پاک کن"
                 )
             ],
-
             [
-                InlineKeyboardButton(
-                    text="❌ لغو",
-                    callback_data="home"
+                KeyboardButton(
+                    text="❌ لغو"
                 )
             ]
-        ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
     )
 
 
-# ============================================================
-# BACK
-# ============================================================
-
 def back_menu():
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-
+    return ReplyKeyboardMarkup(
+        keyboard=[
             [
-                InlineKeyboardButton(
-                    text="🔙 بازگشت",
-                    callback_data="home"
+                KeyboardButton(
+                    text="🔙 بازگشت"
                 )
             ]
-        ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+
+def publish_menu():
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="📤 انتشار خبر"
+                )
+            ],
+            [
+                KeyboardButton(
+                    text="🔙 بازگشت"
+                )
+            ]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
     )
 
 
@@ -1373,7 +1528,7 @@ async def process_news(
                 try:
                     await status.edit_text(
                         "🧠 مقاله کامل دریافت شد.\n"
-                        "در حال استخراج نکات مهم و خلاصه‌سازی..."
+                        "در حال استخراج تاریخ‌ها، اعداد و نکات مهم..."
                     )
                 except Exception:
                     pass
@@ -1400,7 +1555,7 @@ async def process_news(
             try:
                 await status.edit_text(
                     "🧠 در حال تحلیل کل مقاله...\n"
-                    "این مرحله ممکن است کمی طول بکشد."
+                    "تاریخ‌ها، اعداد و اطلاعات مهم نیز بررسی می‌شوند."
                 )
             except Exception:
                 pass
@@ -1492,8 +1647,9 @@ async def process_news(
             )
 
         await message.answer(
-            "✅ خبر آماده است.",
-            reply_markup=main_menu()
+            "✅ خبر آماده است.\n\n"
+            "در صورت تأیید، روی «📤 انتشار خبر» بزن.",
+            reply_markup=publish_menu()
         )
 
     except Exception as error:
@@ -1539,6 +1695,10 @@ async def start_handler(
 
         return
 
+    user_modes[
+        message.from_user.id
+    ] = "main"
+
     await message.answer(
         "✨ <b>پنل مدیریت Gamefa</b>\n\n"
         "به پنل مدیریت اخبار خوش آمدید.\n"
@@ -1549,320 +1709,440 @@ async def start_handler(
 
 
 # ============================================================
-# CALLBACK
+# MAIN MENU BUTTONS
 # ============================================================
 
-@router.callback_query()
-async def callback_handler(
-    callback: CallbackQuery
+@router.message(
+    F.text == "🔎 بررسی خبر جدید"
+)
+async def news_new_handler(
+    message: Message
 ):
 
-    if not is_admin_id(
-        callback.from_user.id
-    ):
-
-        await callback.answer(
-            "⛔ دسترسی ندارید.",
-            show_alert=True
-        )
-
+    if not is_admin(message):
         return
 
-    data = callback.data
+    user_modes[
+        message.from_user.id
+    ] = "news"
 
-    await callback.answer()
+    await message.answer(
+        "🔎 <b>بررسی خبر جدید</b>\n\n"
+        "نوع ورودی را انتخاب کن:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=news_menu()
+    )
 
-    # ========================================================
-    # HOME
-    # ========================================================
 
-    if data == "home":
+@router.message(
+    F.text == "📁 آرشیو"
+)
+async def archive_handler(
+    message: Message
+):
 
-        await callback.message.edit_text(
-            "✨ <b>پنل مدیریت Gamefa</b>\n\n"
-            "یک گزینه را انتخاب کن:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=main_menu()
-        )
-
+    if not is_admin(message):
         return
 
-    # ========================================================
-    # NEWS
-    # ========================================================
+    user_modes[
+        message.from_user.id
+    ] = "archive"
 
-    if data == "news_new":
+    await message.answer(
+        "📁 <b>آرشیو اخبار</b>\n\n"
+        "گزینه موردنظر را انتخاب کن:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=archive_menu()
+    )
 
-        await callback.message.edit_text(
-            "🔎 <b>بررسی خبر جدید</b>\n\n"
-            "نوع ورودی را انتخاب کن:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=news_menu()
-        )
 
+@router.message(
+    F.text == "📊 آمار"
+)
+async def stats_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    if data == "news_text":
+    await message.answer(
+        "📊 <b>آمار ربات</b>\n\n"
+        f"📰 تعداد اخبار آرشیو: <b>{len(memory)}</b>\n"
+        f"💾 ظرفیت حافظه: <b>{MAX_MEMORY}</b>\n"
+        f"👤 مدیر اصلی: <code>{ADMIN_ID}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=main_menu()
+    )
 
-        await callback.message.edit_text(
-            "📝 <b>ارسال خبر</b>\n\n"
-            "متن خبر را ارسال کن.\n\n"
-            "هوش مصنوعی آن را تحلیل و به خلاصه ۷ خطی تبدیل می‌کند.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
 
+@router.message(
+    F.text == "🤖 وضعیت AI"
+)
+async def ai_status_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    if data == "news_link":
+    status = (
+        "🟢 فعال"
+        if OPENAI_API_KEY
+        else "🔴 غیرفعال"
+    )
 
-        await callback.message.edit_text(
-            "🔗 <b>ارسال لینک Gamefa</b>\n\n"
-            "لینک مقاله Gamefa را ارسال کن.\n\n"
-            "ربات کل مقاله را دریافت می‌کند و فقط بند اول را کپی نمی‌کند؛ "
-            "بلکه محتوای کامل مقاله را تحلیل و خلاصه می‌کند.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
+    await message.answer(
+        "🤖 <b>وضعیت هوش مصنوعی</b>\n\n"
+        f"وضعیت: {status}\n"
+        f"مدل: <code>{escape_html(MODEL)}</code>\n\n"
+        "حالت پردازش:\n"
+        "✅ تحلیل کل مقاله\n"
+        "✅ استخراج تاریخ‌ها و اعداد\n"
+        "✅ استخراج نکات مهم\n"
+        "✅ خلاصه‌سازی\n"
+        "✅ بازنویسی\n"
+        "✅ خروجی ۷ جمله‌ای",
+        parse_mode=ParseMode.HTML,
+        reply_markup=main_menu()
+    )
 
+
+@router.message(
+    F.text == "⚙️ تنظیمات"
+)
+async def settings_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    # ========================================================
-    # ARCHIVE
-    # ========================================================
+    user_modes[
+        message.from_user.id
+    ] = "settings"
 
-    if data == "archive":
+    await message.answer(
+        "⚙️ <b>تنظیمات</b>\n\n"
+        "یک بخش را انتخاب کن:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=settings_menu()
+    )
 
-        await callback.message.edit_text(
-            "📁 <b>آرشیو اخبار</b>\n\n"
-            "گزینه موردنظر را انتخاب کن:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=archive_menu()
-        )
 
+@router.message(
+    F.text == "📋 راهنما"
+)
+async def help_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    if data == "archive_latest":
+    await message.answer(
+        "📋 <b>راهنمای ربات</b>\n\n"
+        "🔎 بررسی خبر جدید\n"
+        "برای پردازش متن یا لینک Gamefa.\n\n"
+        "🤖 پردازش AI\n"
+        "کل مقاله تحلیل شده و اطلاعات مهم آن استخراج می‌شود.\n\n"
+        "📰 خروجی\n"
+        "یک تیتر + ۷ جمله خبری در یک پاراگراف.\n\n"
+        "📁 آرشیو\n"
+        "ذخیره و بررسی اخبار پردازش‌شده.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=main_menu()
+    )
 
-        if not memory:
 
-            text = (
-                "📚 آرشیو خالی است."
-            )
+# ============================================================
+# NEWS MENU
+# ============================================================
 
-        else:
+@router.message(
+    F.text == "📝 ارسال خبر"
+)
+async def news_text_handler(
+    message: Message
+):
 
-            latest = memory[-10:]
+    if not is_admin(message):
+        return
 
-            lines = [
-                "📚 <b>آخرین اخبار</b>",
+    user_modes[
+        message.from_user.id
+    ] = "waiting_news"
+
+    await message.answer(
+        "📝 <b>ارسال خبر</b>\n\n"
+        "متن خبر را ارسال کن.\n\n"
+        "هوش مصنوعی کل متن را تحلیل می‌کند "
+        "و یک تیتر + ۷ جمله خبری تولید می‌کند.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=back_menu()
+    )
+
+
+@router.message(
+    F.text == "🔗 ارسال لینک Gamefa"
+)
+async def news_link_handler(
+    message: Message
+):
+
+    if not is_admin(message):
+        return
+
+    user_modes[
+        message.from_user.id
+    ] = "waiting_news"
+
+    await message.answer(
+        "🔗 <b>ارسال لینک Gamefa</b>\n\n"
+        "لینک مقاله Gamefa را ارسال کن.\n\n"
+        "ربات کل مقاله را دریافت می‌کند و "
+        "تاریخ‌ها، اعداد، نسخه‌ها و اطلاعات مهم "
+        "را از کل مقاله استخراج می‌کند.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=back_menu()
+    )
+
+
+# ============================================================
+# ARCHIVE MENU
+# ============================================================
+
+@router.message(
+    F.text == "📚 آخرین اخبار"
+)
+async def archive_latest_handler(
+    message: Message
+):
+
+    if not is_admin(message):
+        return
+
+    if not memory:
+
+        text = (
+            "📚 آرشیو خالی است."
+        )
+
+    else:
+
+        latest = memory[-10:]
+
+        lines = [
+            "📚 <b>آخرین اخبار</b>",
+            ""
+        ]
+
+        for index, item in enumerate(
+            reversed(latest),
+            1
+        ):
+
+            post = item.get(
+                "post",
                 ""
-            ]
-
-            for index, item in enumerate(
-                reversed(latest),
-                1
-            ):
-
-                post = item.get(
-                    "post",
-                    ""
-                )
-
-                clean = re.sub(
-                    r"<[^>]+>",
-                    "",
-                    post
-                )
-
-                first_line = (
-                    clean.splitlines()[0]
-                    if clean
-                    else "خبر بدون عنوان"
-                )
-
-                lines.append(
-                    f"{index}. {first_line[:100]}"
-                )
-
-            text = "\n".join(
-                lines
             )
 
-        await callback.message.edit_text(
-            text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
+            clean = re.sub(
+                r"<[^>]+>",
+                "",
+                post
+            )
+
+            first_line = (
+                clean.splitlines()[0]
+                if clean
+                else "خبر بدون عنوان"
+            )
+
+            lines.append(
+                f"{index}. {first_line[:100]}"
+            )
+
+        text = "\n".join(
+            lines
         )
 
+    await message.answer(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=archive_menu()
+    )
+
+
+@router.message(
+    F.text == "🗑 پاکسازی آرشیو"
+)
+async def clear_confirm_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    # ========================================================
-    # STATS
-    # ========================================================
+    await message.answer(
+        "⚠️ <b>پاکسازی آرشیو</b>\n\n"
+        "تمام اخبار ذخیره‌شده حذف خواهند شد.\n"
+        "این عملیات قابل بازگشت نیست.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=clear_confirm_menu()
+    )
 
-    if data == "stats":
 
-        await callback.message.edit_text(
-            "📊 <b>آمار ربات</b>\n\n"
-            f"📰 تعداد اخبار آرشیو: <b>{len(memory)}</b>\n"
-            f"💾 ظرفیت حافظه: <b>{MAX_MEMORY}</b>\n"
-            f"👤 مدیر اصلی: <code>{ADMIN_ID}</code>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
+@router.message(
+    F.text == "⚠️ بله، پاک کن"
+)
+async def clear_yes_handler(
+    message: Message
+):
 
+    if not is_admin(message):
         return
 
-    # ========================================================
-    # AI STATUS
-    # ========================================================
+    memory.clear()
 
-    if data == "ai_status":
+    save_memory()
 
-        status = (
-            "🟢 فعال"
-            if OPENAI_API_KEY
-            else "🔴 غیرفعال"
-        )
+    prepared.clear()
 
-        await callback.message.edit_text(
-            "🤖 <b>وضعیت هوش مصنوعی</b>\n\n"
-            f"وضعیت: {status}\n"
-            f"مدل: <code>{escape_html(MODEL)}</code>\n\n"
-            "حالت پردازش:\n"
-            "✅ تحلیل کل مقاله\n"
-            "✅ استخراج نکات مهم\n"
-            "✅ خلاصه‌سازی\n"
-            "✅ بازنویسی\n"
-            "✅ خروجی ۷ خطی",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
+    await message.answer(
+        "✅ <b>آرشیو پاک شد.</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=main_menu()
+    )
 
+
+@router.message(
+    F.text == "❌ لغو"
+)
+async def clear_cancel_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    # ========================================================
-    # SETTINGS
-    # ========================================================
+    await message.answer(
+        "❌ عملیات لغو شد.",
+        reply_markup=main_menu()
+    )
 
-    if data == "settings":
 
-        await callback.message.edit_text(
-            "⚙️ <b>تنظیمات</b>\n\n"
-            "یک بخش را انتخاب کن:",
-            parse_mode=ParseMode.HTML,
-            reply_markup=settings_menu()
-        )
+# ============================================================
+# SETTINGS
+# ============================================================
 
+@router.message(
+    F.text == "📢 کانال انتشار"
+)
+async def setting_channel_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    if data == "setting_channel":
+    await message.answer(
+        "📢 <b>کانال انتشار</b>\n\n"
+        f"<code>{escape_html(CHANNEL_ID)}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=settings_menu()
+    )
 
-        await callback.message.edit_text(
-            "📢 <b>کانال انتشار</b>\n\n"
-            f"<code>{escape_html(CHANNEL_ID)}</code>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
 
+@router.message(
+    F.text == "🧠 مدل AI"
+)
+async def setting_model_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    if data == "setting_model":
+    await message.answer(
+        "🧠 <b>مدل هوش مصنوعی</b>\n\n"
+        f"<code>{escape_html(MODEL)}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=settings_menu()
+    )
 
-        await callback.message.edit_text(
-            "🧠 <b>مدل هوش مصنوعی</b>\n\n"
-            f"<code>{escape_html(MODEL)}</code>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
 
+@router.message(
+    F.text == "🖼 سیستم تصویر"
+)
+async def setting_image_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    if data == "setting_image":
+    await message.answer(
+        "🖼 <b>سیستم تصویر</b>\n\n"
+        "ربات در صورت وجود تصویر اصلی مقاله، "
+        "همان تصویر را استفاده می‌کند.\n\n"
+        "اگر مقاله تصویر نداشته باشد، "
+        "تصویر تصادفی انتخاب نمی‌شود.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=settings_menu()
+    )
 
-        await callback.message.edit_text(
-            "🖼 <b>سیستم تصویر</b>\n\n"
-            "ربات در صورت وجود تصویر اصلی مقاله، "
-            "همان تصویر را استفاده می‌کند.\n\n"
-            "اگر مقاله تصویر نداشته باشد، "
-            "تصویر تصادفی انتخاب نمی‌شود.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
 
+@router.message(
+    F.text == "✍️ قالب خبر"
+)
+async def setting_format_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    if data == "setting_format":
+    await message.answer(
+        "✍️ <b>قالب خبر</b>\n\n"
+        "• تیتر فارسی\n"
+        "• ۷ جمله خبری\n"
+        "• یک پاراگراف واحد\n"
+        "• تحلیل کل مقاله\n"
+        "• استخراج تاریخ و اعداد\n"
+        "• عدم کپی بند اول\n"
+        "• شروع فارسی\n"
+        "• دسته‌بندی خودکار\n"
+        "• امضای Gamefa",
+        parse_mode=ParseMode.HTML,
+        reply_markup=settings_menu()
+    )
 
-        await callback.message.edit_text(
-            "✍️ <b>قالب خبر</b>\n\n"
-            "• تیتر فارسی\n"
-            "• خلاصه دقیق ۷ خطی\n"
-            "• تحلیل کل مقاله\n"
-            "• عدم کپی بند اول\n"
-            "• شروع فارسی\n"
-            "• دسته‌بندی خودکار\n"
-            "• امضای Gamefa",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
 
+# ============================================================
+# BACK
+# ============================================================
+
+@router.message(
+    F.text == "🔙 بازگشت"
+)
+async def back_handler(
+    message: Message
+):
+
+    if not is_admin(message):
         return
 
-    # ========================================================
-    # HELP
-    # ========================================================
+    user_modes[
+        message.from_user.id
+    ] = "main"
 
-    if data == "help":
-
-        await callback.message.edit_text(
-            "📋 <b>راهنمای ربات</b>\n\n"
-            "🔎 بررسی خبر جدید\n"
-            "برای پردازش متن یا لینک Gamefa.\n\n"
-            "🤖 پردازش AI\n"
-            "کل مقاله تحلیل شده و خلاصه دقیق تولید می‌شود.\n\n"
-            "📰 خروجی\n"
-            "یک تیتر + دقیقاً ۷ خط خبر.\n\n"
-            "📁 آرشیو\n"
-            "ذخیره و بررسی اخبار پردازش‌شده.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=back_menu()
-        )
-
-        return
-
-    # ========================================================
-    # CLEAR
-    # ========================================================
-
-    if data == "clear_confirm":
-
-        await callback.message.edit_text(
-            "⚠️ <b>پاکسازی آرشیو</b>\n\n"
-            "تمام اخبار ذخیره‌شده حذف خواهند شد.\n"
-            "این عملیات قابل بازگشت نیست.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=clear_confirm_menu()
-        )
-
-        return
-
-    if data == "clear_yes":
-
-        memory.clear()
-
-        save_memory()
-
-        prepared.clear()
-
-        await callback.message.edit_text(
-            "✅ <b>آرشیو پاک شد.</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=main_menu()
-        )
-
-        return
+    await message.answer(
+        "✨ <b>پنل مدیریت Gamefa</b>\n\n"
+        "یک گزینه را انتخاب کن:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=main_menu()
+    )
 
 
 # ============================================================
@@ -1961,6 +2241,26 @@ async def publish_news(
 
 
 # ============================================================
+# PUBLISH BUTTON
+# ============================================================
+
+@router.message(
+    F.text == "📤 انتشار خبر"
+)
+async def publish_button_handler(
+    message: Message
+):
+
+    if not is_admin(message):
+        return
+
+    await publish_news(
+        message,
+        message.from_user.id
+    )
+
+
+# ============================================================
 # COMMAND: PUBLISH
 # ============================================================
 
@@ -2042,6 +2342,68 @@ async def text_handler(
 
     if text.startswith("/"):
         return
+
+    user_id = message.from_user.id
+
+    # --------------------------------------------------------
+    # اگر کاربر در حالت ارسال خبر باشد
+    # --------------------------------------------------------
+
+    mode = user_modes.get(
+        user_id,
+        "main"
+    )
+
+    if mode == "waiting_news":
+
+        # اگر متن لینک Gamefa باشد
+        url = extract_url(text)
+
+        if url:
+            parsed = urlparse(url)
+
+            if "gamefa.com" not in (
+                parsed.netloc.lower()
+            ):
+
+                await message.answer(
+                    "⚠️ فقط لینک‌های Gamefa قابل پردازش هستند.",
+                    reply_markup=back_menu()
+                )
+
+                return
+
+        await process_news(
+            message,
+            text
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # اگر لینک Gamefa مستقیماً ارسال شد
+    # --------------------------------------------------------
+
+    url = extract_url(text)
+
+    if url:
+
+        parsed = urlparse(url)
+
+        if "gamefa.com" in (
+            parsed.netloc.lower()
+        ):
+
+            await process_news(
+                message,
+                text
+            )
+
+            return
+
+    # --------------------------------------------------------
+    # متن عادی
+    # --------------------------------------------------------
 
     await process_news(
         message,
