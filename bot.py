@@ -51,6 +51,7 @@ try:
 except (ValueError, TypeError):
     ADMIN_ID = 0
 
+
 MEMORY_FILE = Path("news_memory.json")
 
 MAX_MEMORY = 1500
@@ -125,6 +126,7 @@ def save_memory():
         )
 
     except Exception as error:
+
         log.warning(
             "Memory save error: %s",
             error
@@ -322,7 +324,7 @@ def is_admin_id(user_id):
 
 
 # ============================================================
-# PERSIAN START
+# PERSIAN
 # ============================================================
 
 PERSIAN_RE = re.compile(
@@ -339,10 +341,11 @@ def starts_with_persian(text):
 
     # حذف علائم و ایموجی‌های ابتدایی
     clean = re.sub(
-        r"^[🎮🎬📱🟣📢📰🔵🟢🟡🟠⚪⚫\s\-\–—•]+",
+        r"^[\s\W_]+",
         "",
-        clean
-    ).strip()
+        clean,
+        flags=re.UNICODE
+    )
 
     if not clean:
         return False
@@ -368,7 +371,6 @@ def make_persian_start(
         return text
 
     if is_title:
-
         return (
             "گزارش جدید درباره "
             + text
@@ -381,38 +383,39 @@ def make_persian_start(
 
 
 # ============================================================
-# ENSURE PERSIAN START
+# ENSURE EVERY SENTENCE STARTS WITH PERSIAN
 # ============================================================
 
-def ensure_persian_start(
-    text,
-    is_title=False
-):
+def ensure_persian_sentence_start(sentence):
 
-    """
-    اگر متن با انگلیسی شروع شده باشد،
-    قبل از آن یک عبارت فارسی مناسب قرار می‌دهد.
-    """
+    sentence = sentence.strip()
 
-    if not text:
-        return text
+    if not sentence:
+        return sentence
 
-    text = text.strip()
-
-    # حذف علامت‌های اضافی
-    text = re.sub(
-        r"^[🎮🎬📱📢🟣📰🔵🟢🟡🟠⚪⚫\s]+",
+    # حذف bullet و شماره
+    sentence = re.sub(
+        r"^[•\-–—\d.)]+\s*",
         "",
-        text
-    ).strip()
+        sentence
+    )
 
-    if starts_with_persian(text):
-        return text
+    # حذف ایموجی ابتدای جمله
+    sentence = re.sub(
+        r"^[🎮🎬📱📢🟣📰🔵🟢🟡🟠🔴⚪⚫]+\s*",
+        "",
+        sentence
+    )
 
-    if is_title:
-        return "گزارش جدید درباره " + text
+    if starts_with_persian(sentence):
+        return sentence
 
-    return "براساس گزارش منتشرشده، " + text
+    # اگر جمله با انگلیسی شروع شد،
+    # یک عبارت فارسی طبیعی به ابتدا اضافه می‌کنیم.
+    return (
+        "براساس این گزارش، "
+        + sentence
+    )
 
 
 # ============================================================
@@ -553,16 +556,14 @@ def clean_ai_text(text):
             text
         )
 
-    # Channel
     text = re.sub(
         r"(?im)^\s*(?:🆔\s*)?@Gamefa_official\s*$",
         "",
         text
     )
 
-    # Emojis at line beginning
     text = re.sub(
-        r"(?m)^\s*[🎮🎬📱📢🟣📰🔵🟢🟡🟠⚪⚫]\s*",
+        r"(?m)^\s*[🎮🎬📱📢🟣📰]\s*",
         "",
         text
     )
@@ -733,9 +734,9 @@ async def fetch_gamefa(url):
         soup
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # TITLE
-    # ========================================================
+    # --------------------------------------------------------
 
     title = ""
 
@@ -759,9 +760,9 @@ async def fetch_gamefa(url):
             )
         )
 
-    # ========================================================
+    # --------------------------------------------------------
     # DESCRIPTION
-    # ========================================================
+    # --------------------------------------------------------
 
     description = ""
 
@@ -788,9 +789,9 @@ async def fetch_gamefa(url):
 
             break
 
-    # ========================================================
+    # --------------------------------------------------------
     # IMAGE
-    # ========================================================
+    # --------------------------------------------------------
 
     image_candidates = []
 
@@ -817,9 +818,9 @@ async def fetch_gamefa(url):
                 )
             )
 
-    # ========================================================
+    # --------------------------------------------------------
     # ARTICLE
-    # ========================================================
+    # --------------------------------------------------------
 
     article = None
 
@@ -849,9 +850,9 @@ async def fetch_gamefa(url):
     if article is None:
         article = soup
 
-    # ========================================================
+    # --------------------------------------------------------
     # PARAGRAPHS
-    # ========================================================
+    # --------------------------------------------------------
 
     paragraphs = article.find_all(
         [
@@ -898,9 +899,9 @@ async def fetch_gamefa(url):
             text
         )
 
-    # ========================================================
+    # --------------------------------------------------------
     # FALLBACK
-    # ========================================================
+    # --------------------------------------------------------
 
     if len(body_parts) < 3:
 
@@ -926,19 +927,15 @@ async def fetch_gamefa(url):
                         text
                     )
 
-    # ========================================================
-    # FULL BODY
-    # ========================================================
-
     body = "\n".join(
         body_parts
     )
 
     body = body[:70000]
 
-    # ========================================================
+    # --------------------------------------------------------
     # IMAGE FALLBACK
-    # ========================================================
+    # --------------------------------------------------------
 
     if not image_candidates:
 
@@ -986,6 +983,7 @@ async def fetch_gamefa(url):
 def get_ai_client():
 
     if not OPENAI_API_KEY:
+
         raise RuntimeError(
             "OPENAI_API_KEY تنظیم نشده است."
         )
@@ -996,7 +994,7 @@ def get_ai_client():
 
 
 # ============================================================
-# FACT EXTRACTION PROMPT
+# FACT EXTRACTION
 # ============================================================
 
 FACT_PROMPT = r"""
@@ -1004,42 +1002,25 @@ FACT_PROMPT = r"""
 
 وظیفه تو تولید خبر نیست.
 
-وظیفه تو این است که مقاله را کامل بخوانی و فقط واقعیت‌های مهم و مستقیم مربوط به موضوع اصلی مقاله را استخراج کنی.
+مقاله را کامل بررسی کن و فقط واقعیت‌های مهم و مستقیم مربوط به موضوع اصلی را استخراج کن.
 
-ممکن است صفحه شامل موارد زیر باشد:
+مطالب مرتبط، مطالب پیشنهادی، تبلیغات، نویسنده، منو، لینک‌های داخلی، Reviewer، اطلاعات AI و بخش‌های جانبی را وارد نکن.
 
-- مطالب مرتبط
-- مطالب پیشنهادی
-- مقالات دیگر
-- تبلیغات
-- اطلاعات نویسنده
-- زمان انتشار
-- باکس‌های سایت
-- لینک‌های داخلی
-- متن‌های جانبی
-- Reviewer
-- اطلاعات مربوط به عملکرد AI
-
-هیچ‌کدام از این موارد را به‌عنوان محتوای اصلی خبر در نظر نگیر.
-
-فقط اطلاعاتی را استخراج کن که مستقیماً درباره موضوع اصلی مقاله هستند.
-
-اطلاعات مهمی که باید در صورت وجود استخراج شوند:
+اطلاعات مهم شامل موارد زیر هستند:
 
 - اتفاق اصلی
 - نام افراد
 - نام بازی
 - نام فیلم یا سریال
-- نام شرکت‌ها
+- شرکت‌ها
 - سازنده
 - ناشر
 - پلتفرم‌ها
 - تاریخ عرضه
 - زمان عرضه
 - تاریخ انتشار
-- تاریخ دسترسی زودهنگام
-- زمان پیش‌دانلود
-- حجم دانلود
+- پیش‌دانلود
+- حجم
 - قیمت
 - نسخه‌ها
 - وضعیت پروژه
@@ -1048,20 +1029,15 @@ FACT_PROMPT = r"""
 - نویسنده
 - فروش
 - آمار
-- تعداد
-- ویژگی‌های مهم
-- نقل‌قول مهم
+- اعداد
+- نقل‌قول‌های مهم
 - وضعیت تأیید یا شایعه بودن خبر
 
-اگر تاریخ عرضه در مقاله وجود دارد، حتماً آن را استخراج کن.
+اگر اطلاعاتی در مقاله وجود ندارد، آن را اختراع نکن.
 
-اگر عدد یا آمار مهمی در مقاله وجود دارد، آن را حذف نکن.
+اگر عدد یا تاریخ مهمی وجود دارد، حتماً استخراج شود.
 
-اگر اطلاعاتی وجود ندارد، آن را اختراع نکن.
-
-مقالات مرتبط و مطالب جانبی را با موضوع اصلی قاطی نکن.
-
-خروجی فقط JSON معتبر باشد.
+فقط JSON معتبر تولید کن.
 
 ساختار:
 
@@ -1084,9 +1060,7 @@ FACT_PROMPT = r"""
   "important_missing": []
 }
 
-importance باید عددی بین 1 تا 5 باشد.
-
-فقط اطلاعاتی را وارد کن که واقعاً در مقاله وجود دارند.
+importance عددی بین 1 تا 5 باشد.
 """
 
 
@@ -1148,7 +1122,7 @@ async def extract_facts(source):
         if start == -1 or end == -1:
 
             raise RuntimeError(
-                "AI نتوانست Factهای مقاله را استخراج کند."
+                "AI نتوانست اطلاعات مقاله را استخراج کند."
             )
 
         try:
@@ -1160,7 +1134,7 @@ async def extract_facts(source):
         except Exception as error:
 
             raise RuntimeError(
-                "JSON استخراج Fact نامعتبر است."
+                "JSON استخراج اطلاعات نامعتبر است."
             ) from error
 
     if not isinstance(
@@ -1169,7 +1143,7 @@ async def extract_facts(source):
     ):
 
         raise RuntimeError(
-            "ساختار Fact نامعتبر است."
+            "ساختار اطلاعات استخراج‌شده نامعتبر است."
         )
 
     return data
@@ -1182,182 +1156,38 @@ async def extract_facts(source):
 NEWS_PROMPT = r"""
 تو سردبیر ارشد اخبار فارسی Gamefa هستی.
 
-از اطلاعات استخراج‌شده از مقاله، یک خبر حرفه‌ای فارسی تولید کن.
+از FACTهای استخراج‌شده یک خبر حرفه‌ای فارسی تولید کن.
 
-قانون بسیار مهم:
+قوانین خروجی:
 
-خروجی نهایی باید فقط شامل این موارد باشد:
+1. خط اول فقط تیتر باشد.
+2. بعد از تیتر فقط یک پاراگراف خبری بنویس.
+3. پاراگراف دقیقاً 7 جمله داشته باشد.
+4. هیچ جمله‌ای با کلمه انگلیسی شروع نشود.
+5. تیتر نیز هرگز با کلمه انگلیسی شروع نشود.
+6. اگر نام انگلیسی ابتدای جمله لازم است، جمله را با یک عبارت فارسی طبیعی شروع کن.
+7. تمام اطلاعات مهم موجود در FACTها را در صورت مرتبط بودن حفظ کن.
+8. تاریخ‌ها، اعداد، حجم، قیمت، پلتفرم‌ها، بازیگران، سازنده، ناشر و وضعیت عرضه را حذف نکن.
+9. فقط از اطلاعات موجود در FACTها استفاده کن.
+10. هیچ اطلاعاتی را حدس نزن.
+11. هیچ اطلاعاتی را اختراع نکن.
+12. مطالب مرتبط را وارد خبر نکن.
+13. درباره AI، Reviewer، Fact، سیستم استخراج، مقاله ورودی یا فرایند تولید صحبت نکن.
+14. متن کوتاه و مناسب کپشن تلگرام باشد.
+15. کل تیتر + متن کمتر از 900 کاراکتر باشد.
+16. از Markdown استفاده نکن.
+17. از Bullet استفاده نکن.
+18. از شماره‌گذاری استفاده نکن.
+19. از Emoji استفاده نکن.
+20. لینک و آیدی کانال ننویس.
 
-خط اول:
-تیتر
+نمونه ساختار:
 
-خطوط بعدی:
-دقیقاً 7 جمله خبری.
-
-اما در خروجی نهایی، 7 جمله خبر باید همگی در یک پاراگراف قرار بگیرند و بین جمله‌ها Enter نزن.
-
-ساختار:
-
-تیتر
+تیتر فارسی
 
 جمله اول. جمله دوم. جمله سوم. جمله چهارم. جمله پنجم. جمله ششم. جمله هفتم.
 
----
-
-مهم‌ترین قانون:
-
-فقط از Factهای استخراج‌شده استفاده کن.
-
-هیچ اطلاعاتی را حدس نزن.
-
-هیچ اطلاعاتی را از خودت اضافه نکن.
-
----
-
-قانون بسیار مهم درباره شروع متن:
-
-تیتر MUST با یک کلمه یا عبارت فارسی شروع شود.
-
-هیچ تیتر یا جمله‌ای نباید با کلمه انگلیسی شروع شود.
-
-اگر نام انگلیسی در ابتدای جمله لازم است، ابتدا یک عبارت فارسی کوتاه و طبیعی قرار بده.
-
-مثلاً:
-
-درست:
-جیکوب الوردی برای پیوستن به فیلم Scapegoat وارد مذاکره شده است
-
-درست:
-بازی GTA 6 طبق گزارش جدید...
-
-درست:
-فیلم Supergirl با...
-
-غلط:
-Jacob Elordi is in talks...
-
-غلط:
-GTA 6 will...
-
-غلط:
-Supergirl is...
-
-این قانون برای تک‌تک 7 جمله الزامی است، نه فقط تیتر.
-
----
-
-اطلاعات مهم نباید حذف شوند.
-
-اگر Factهای مقاله شامل یکی از موارد زیر هستند، در صورت مرتبط بودن باید در خبر استفاده شوند:
-
-- تاریخ عرضه
-- زمان عرضه
-- تاریخ انتشار
-- پیش‌دانلود
-- حجم بازی
-- قیمت
-- پلتفرم
-- نسخه‌ها
-- بازیگران
-- کارگردان
-- سازنده
-- ناشر
-- آمار
-- اعداد
-- وضعیت پروژه
-
-اگر مقاله درباره حجم و زمان عرضه بازی است و تاریخ عرضه در Factها وجود دارد، حذف تاریخ عرضه ممنوع است.
-
----
-
-درباره منابع:
-
-نگو:
-«طبق توضیحات مقاله»
-
-نگو:
-«متن کامل صفحه نشان می‌دهد»
-
-نگو:
-«Reviewer گفته»
-
-نگو:
-«هوش مصنوعی تشخیص داد»
-
-نگو:
-«امتیاز دقت»
-
-نگو:
-«در این صفحه»
-
-نگو:
-«مقاله با تیتر دیگری همراه است»
-
-نگو:
-«اطلاعاتی که Reviewer بررسی کرده»
-
-هیچ اشاره‌ای به سیستم AI، Reviewer، Fact، مقاله ورودی یا فرایند تولید نکن.
-
----
-
-مطالب مرتبط:
-
-اگر در صفحه اطلاعات مربوط به مقاله دیگری وجود دارد، آن را وارد خبر نکن.
-
-مثلاً اگر موضوع اصلی مقاله درباره Jacob Elordi و فیلم Scapegoat است و صفحه در پایین خود مطلبی درباره The Dog Stars دارد، اطلاعات The Dog Stars نباید وارد خبر Scapegoat شود؛ مگر اینکه مستقیماً در متن اصلی خبر درباره موضوع Scapegoat استفاده شده باشد.
-
----
-
-تیتر:
-
-کوتاه و خبری باشد.
-
-حتماً با فارسی شروع شود.
-
----
-
-سبک:
-
-فارسی روان و طبیعی.
-
-لحن خبری.
-
-بدون اغراق.
-
-بدون تحلیل شخصی.
-
-بدون نظر شخصی.
-
-بدون ساخت اطلاعات.
-
-نام‌های انگلیسی مهم را حفظ کن، اما هرگز اجازه نده جمله با آن‌ها شروع شود.
-
----
-
-این موارد ممنوع هستند:
-
-- Markdown
-- Bold
-- Bullet
-- شماره‌گذاری
-- Emoji
-- لینک
-- آیدی کانال
-- Reviewer
-- AI Score
-- Accuracy Score
-- توضیح درباره مقاله
-- توضیح درباره فرآیند تولید
-- توضیح درباره Factها
-
----
-
-خروجی فقط:
-
-تیتر
-یک پاراگراف شامل دقیقاً 7 جمله خبری
-
-هیچ چیز دیگری ننویس.
+فقط همین دو بخش را خروجی بده.
 """
 
 
@@ -1376,13 +1206,13 @@ async def generate_news(
     )
 
     input_text = (
-        "FACTS استخراج‌شده از مقاله:\n\n"
+        "FACTS استخراج‌شده:\n\n"
         + facts_json
         + "\n\n"
-        "عنوان اصلی مقاله:\n"
+        "عنوان اصلی:\n"
         + source.get("title", "")
         + "\n\n"
-        "متن اصلی مقاله برای بررسی نهایی:\n"
+        "متن اصلی مقاله:\n"
         + source.get("body", "")
         + "\n\n"
         + retry_instruction
@@ -1431,6 +1261,7 @@ def split_sentences(text):
     ]
 
     if not lines:
+
         return "", []
 
     title = lines[0]
@@ -1445,9 +1276,9 @@ def split_sentences(text):
         body
     ).strip()
 
-    # پشتیبانی بهتر از علائم فارسی و انگلیسی
+    # جدا کردن جمله‌ها با علائم فارسی و انگلیسی
     parts = re.split(
-        r"(?<=[.!؟])\s+",
+        r"(?<=[.!؟])(?:\s+|(?=[«"]))",
         body
     )
 
@@ -1458,6 +1289,34 @@ def split_sentences(text):
     ]
 
     return title, parts
+
+
+# ============================================================
+# SMART SENTENCE NORMALIZATION
+# ============================================================
+
+def normalize_sentences(parts):
+
+    result = []
+
+    for sentence in parts:
+
+        sentence = clean_sentence(
+            sentence
+        )
+
+        if not sentence:
+            continue
+
+        sentence = ensure_persian_sentence_start(
+            sentence
+        )
+
+        result.append(
+            sentence
+        )
+
+    return result
 
 
 # ============================================================
@@ -1475,7 +1334,7 @@ def clean_sentence(sentence):
     )
 
     sentence = re.sub(
-        r"^\s*[🎮🎬📱📢🟣📰🔵🟢🟡🟠⚪⚫]+\s*",
+        r"^\s*[🎮🎬📢📱🟣📰]+\s*",
         "",
         sentence
     )
@@ -1490,7 +1349,7 @@ def clean_sentence(sentence):
 
 
 # ============================================================
-# INTERNAL OUTPUT VALIDATION
+# OUTPUT VALIDATION
 # ============================================================
 
 FORBIDDEN_OUTPUT_TERMS = [
@@ -1520,10 +1379,23 @@ def validate_generated_output(
     )
 
     if not title:
+
         return False, title, sentences
 
+    sentences = normalize_sentences(
+        sentences
+    )
+
+    # اجازه می‌دهیم اگر مدل اشتباهاً یک جمله را
+    # با newline جدا کرده، ساختار اصلاح شود.
     if len(sentences) != 7:
+
         return False, title, sentences
+
+    title = make_persian_start(
+        title,
+        is_title=True
+    )
 
     combined = (
         title
@@ -1537,19 +1409,12 @@ def validate_generated_output(
 
             return False, title, sentences
 
-    # ========================================================
-    # تیتر باید فارسی شروع شود
-    # ========================================================
-
+    # هر جمله باید با فارسی شروع شود
     if not starts_with_persian(
         title
     ):
 
         return False, title, sentences
-
-    # ========================================================
-    # تک تک جملات باید فارسی شروع شوند
-    # ========================================================
 
     for sentence in sentences:
 
@@ -1558,6 +1423,15 @@ def validate_generated_output(
         ):
 
             return False, title, sentences
+
+    # بررسی طول
+    if len(
+        title
+        + " "
+        + " ".join(sentences)
+    ) > 950:
+
+        return False, title, sentences
 
     return True, title, sentences
 
@@ -1594,13 +1468,10 @@ def fact_text_list(facts):
         )
 
         try:
-
             importance = int(
                 importance
             )
-
         except Exception:
-
             importance = 0
 
         if fact and importance >= 4:
@@ -1654,7 +1525,6 @@ def check_important_fact_coverage(
             fact_words
         )
 
-        # بررسی اعداد
         numbers = re.findall(
             r"\d+(?:[.,]\d+)?",
             fact
@@ -1670,13 +1540,13 @@ def check_important_fact_coverage(
                 missed += 1
                 continue
 
-        if overlap < 0.25:
+        if overlap < 0.20:
 
             missed += 1
 
     return missed <= max(
         1,
-        len(important_facts) // 3
+        len(important_facts) // 2
     )
 
 
@@ -1685,79 +1555,41 @@ def check_important_fact_coverage(
 # ============================================================
 
 def format_post(
-    generated,
-    facts=None
+    title,
+    sentences
 ):
-
-    generated = clean_ai_text(
-        generated
-    )
-
-    title, sentences = split_sentences(
-        generated
-    )
-
-    sentences = [
-        clean_sentence(x)
-        for x in sentences
-        if clean_sentence(x)
-    ]
-
-    if len(sentences) != 7:
-        return ""
 
     title = clean_sentence(
         title
     )
 
-    # ========================================================
-    # تضمین فارسی بودن شروع تیتر
-    # ========================================================
-
-    title = ensure_persian_start(
+    title = make_persian_start(
         title,
         is_title=True
     )
-
-    # ========================================================
-    # تضمین فارسی بودن شروع هر جمله
-    # ========================================================
 
     fixed_sentences = []
 
     for sentence in sentences:
 
-        sentence = ensure_persian_start(
-            sentence,
-            is_title=False
+        sentence = clean_sentence(
+            sentence
+        )
+
+        sentence = ensure_persian_sentence_start(
+            sentence
         )
 
         fixed_sentences.append(
             sentence
         )
 
-    sentences = fixed_sentences
-
-    # ========================================================
-    # بررسی نهایی
-    # ========================================================
-
-    if not starts_with_persian(
-        title
-    ):
-        return ""
-
-    for sentence in sentences:
-
-        if not starts_with_persian(
-            sentence
-        ):
-            return ""
-
     category = detect_category(
         title
         + " "
-        + " ".join(sentences)
+        + " ".join(
+            fixed_sentences
+        )
     )
 
     title = (
@@ -1766,13 +1598,16 @@ def format_post(
         + title
     )
 
-    # ========================================================
-    # خبر یک پاراگراف واحد
-    # ========================================================
-
     body = " ".join(
-        sentences
+        fixed_sentences
     )
+
+    # حذف فاصله‌های اضافی
+    body = re.sub(
+        r"\s+",
+        " ",
+        body
+    ).strip()
 
     result = (
         "<b>"
@@ -1809,7 +1644,8 @@ async def download_image(
                 "Chrome/151 Safari/537.36",
 
             "Accept":
-                "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+                "image/avif,image/webp,image/apng,"
+                "image/svg+xml,image/*,*/*;q=0.8"
         }
 
         timeout = aiohttp.ClientTimeout(
@@ -1908,7 +1744,7 @@ async def download_image(
 
 
 # ============================================================
-# IMAGE SEARCH
+# FIND BEST IMAGE
 # ============================================================
 
 async def find_best_image(
@@ -1920,16 +1756,12 @@ async def find_best_image(
         ""
     )
 
-    if primary:
+    if not primary:
+        return None
 
-        path = await download_image(
-            primary
-        )
-
-        if path:
-            return path
-
-    return None
+    return await download_image(
+        primary
+    )
 
 
 # ============================================================
@@ -2111,17 +1943,15 @@ async def process_news(
 
             source = article
 
-            if status:
+            try:
 
-                try:
+                await status.edit_text(
+                    "🧠 مقاله دریافت شد.\n"
+                    "در حال استخراج اطلاعات مهم..."
+                )
 
-                    await status.edit_text(
-                        "🧠 مقاله دریافت شد.\n"
-                        "در حال استخراج واقعیت‌های مهم..."
-                    )
-
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
         else:
 
@@ -2171,7 +2001,7 @@ async def process_news(
             try:
 
                 await status.edit_text(
-                    "🧠 اطلاعات اصلی مقاله استخراج شد.\n"
+                    "🧠 اطلاعات اصلی استخراج شد.\n"
                     "در حال ساخت خبر..."
                 )
 
@@ -2179,13 +2009,17 @@ async def process_news(
                 pass
 
         # ====================================================
-        # AI GENERATION
+        # GENERATE
         # ====================================================
 
         generated = await generate_news(
             source,
             facts
         )
+
+        # ====================================================
+        # FIRST VALIDATION
+        # ====================================================
 
         valid, title, sentences = (
             validate_generated_output(
@@ -2200,7 +2034,7 @@ async def process_news(
         if not valid:
 
             log.warning(
-                "AI output failed validation. Regenerating..."
+                "AI output failed first validation. Retrying..."
             )
 
             generated = await generate_news(
@@ -2208,34 +2042,34 @@ async def process_news(
                 facts,
                 retry_instruction=(
                     "\n\n"
-                    "خروجی قبلی رد شده است.\n"
-                    "این بار دقیقاً این ساختار را رعایت کن:\n\n"
-                    "خط اول = یک تیتر فارسی\n"
-                    "خط دوم = جمله اول\n"
-                    "خط سوم = جمله دوم\n"
-                    "خط چهارم = جمله سوم\n"
-                    "خط پنجم = جمله چهارم\n"
-                    "خط ششم = جمله پنجم\n"
-                    "خط هفتم = جمله ششم\n"
-                    "خط هشتم = جمله هفتم\n\n"
-                    "هیچ جمله‌ای نباید با کلمه انگلیسی شروع شود.\n"
-                    "اگر نام انگلیسی ابتدای جمله است، "
-                    "ابتدا یک عبارت فارسی قرار بده.\n"
-                    "هیچ Reviewer، AI، Fact یا توضیحی درباره فرآیند ننویس."
+                    "خروجی قبلی رد شد.\n"
+                    "این بار دقیقاً 7 جمله تولید کن.\n"
+                    "همه 7 جمله در یک پاراگراف باشند.\n"
+                    "تیتر فارسی باشد.\n"
+                    "هر 7 جمله نیز با عبارت فارسی شروع شوند.\n"
+                    "کل خروجی کمتر از 900 کاراکتر باشد.\n"
+                    "هیچ توضیح اضافی ننویس."
                 )
             )
 
         # ====================================================
-        # FACT COVERAGE
+        # SECOND VALIDATION
         # ====================================================
 
-        if not check_important_fact_coverage(
-            generated,
-            facts
-        ):
+        valid, title, sentences = (
+            validate_generated_output(
+                generated
+            )
+        )
+
+        # ====================================================
+        # RETRY 2
+        # ====================================================
+
+        if not valid:
 
             log.warning(
-                "Important facts may be missing. Regenerating..."
+                "AI output failed second validation. Retrying final time..."
             )
 
             generated = await generate_news(
@@ -2243,12 +2077,14 @@ async def process_news(
                 facts,
                 retry_instruction=(
                     "\n\n"
-                    "نسخه قبلی بعضی اطلاعات مهم را از دست داده است.\n"
-                    "تمام Factهای مهم استخراج‌شده را دوباره بررسی کن.\n"
-                    "به‌خصوص تاریخ‌ها، اعداد، پلتفرم‌ها، حجم، قیمت، "
-                    "بازیگران و وضعیت عرضه را در صورت وجود وارد کن.\n"
-                    "خروجی فقط تیتر + 7 جمله باشد.\n"
-                    "تیتر و هر 7 جمله حتماً با فارسی شروع شوند."
+                    "خروجی قبلی معتبر نبود.\n"
+                    "فقط این قالب را رعایت کن:\n\n"
+                    "یک تیتر فارسی\n"
+                    "یک پاراگراف شامل دقیقاً 7 جمله کوتاه فارسی\n\n"
+                    "هر جمله باید با یک عبارت فارسی شروع شود.\n"
+                    "هیچ جمله‌ای با نام انگلیسی شروع نشود.\n"
+                    "کل خروجی کمتر از 850 کاراکتر باشد.\n"
+                    "هیچ Markdown، Emoji، Bullet یا توضیح اضافه ننویس."
                 )
             )
 
@@ -2264,9 +2100,51 @@ async def process_news(
 
         if not valid:
 
-            # یک بار آخر تلاش برای اصلاح ساختار
+            # یک تلاش نهایی برای اصلاح محلی
+            title, raw_sentences = split_sentences(
+                generated
+            )
+
+            raw_sentences = normalize_sentences(
+                raw_sentences
+            )
+
+            if (
+                title
+                and len(raw_sentences) == 7
+            ):
+
+                title = make_persian_start(
+                    title,
+                    is_title=True
+                )
+
+                valid = True
+                sentences = raw_sentences
+
+        if not valid:
+
+            raise RuntimeError(
+                "AI پس از چند تلاش نتوانست خبر را با قالب ۷ جمله‌ای تولید کند."
+            )
+
+        # ====================================================
+        # FACT COVERAGE
+        # ====================================================
+
+        temporary_text = (
+            title
+            + " "
+            + " ".join(sentences)
+        )
+
+        if not check_important_fact_coverage(
+            temporary_text,
+            facts
+        ):
+
             log.warning(
-                "Final validation failed. Running final repair..."
+                "Important facts may be missing. Retrying..."
             )
 
             generated = await generate_news(
@@ -2274,13 +2152,13 @@ async def process_news(
                 facts,
                 retry_instruction=(
                     "\n\n"
-                    "این آخرین تلاش برای اصلاح خروجی است.\n"
-                    "خروجی باید دقیقاً شامل یک تیتر و 7 جمله باشد.\n"
-                    "تیتر با فارسی شروع شود.\n"
-                    "هر 7 جمله نیز با فارسی شروع شوند.\n"
-                    "هیچ خط اضافه‌ای ننویس.\n"
-                    "هیچ Markdown، Emoji، لینک، Reviewer یا AI Score ننویس.\n"
-                    "نام‌های انگلیسی را فقط بعد از شروع فارسی استفاده کن."
+                    "بعضی اطلاعات مهم قبلی حذف شده بود.\n"
+                    "تمام اطلاعات مهم Factها را بررسی کن.\n"
+                    "به‌خصوص تاریخ‌ها، اعداد، پلتفرم‌ها، حجم، "
+                    "قیمت، بازیگران، سازنده، ناشر و وضعیت عرضه.\n"
+                    "دقیقاً 7 جمله کوتاه تولید کن.\n"
+                    "هر جمله با فارسی شروع شود.\n"
+                    "کل خروجی کمتر از 850 کاراکتر باشد."
                 )
             )
 
@@ -2290,19 +2168,19 @@ async def process_news(
                 )
             )
 
-        if not valid:
+            if not valid:
 
-            raise RuntimeError(
-                "خروجی AI پس از بازسازی هنوز ساختار صحیح ندارد."
-            )
+                raise RuntimeError(
+                    "خروجی نهایی AI ساختار معتبر ۷ جمله‌ای ندارد."
+                )
 
         # ====================================================
         # FORMAT
         # ====================================================
 
         post = format_post(
-            generated,
-            facts
+            title,
+            sentences
         )
 
         if not post:
@@ -2365,7 +2243,6 @@ async def process_news(
 
             try:
                 await status.delete()
-
             except Exception:
                 pass
 
@@ -2375,6 +2252,7 @@ async def process_news(
 
         if image_path:
 
+            # تلگرام برای caption محدودیت 1024 کاراکتر دارد.
             if len(post) <= 1024:
 
                 try:
@@ -2391,10 +2269,12 @@ async def process_news(
                 except Exception as error:
 
                     log.warning(
-                        "Photo preview failed: %s",
+                        "Same-message photo preview failed: %s",
                         error
                     )
 
+                    # اگر ارسال عکس با کپشن شکست خورد،
+                    # متن به‌تنهایی ارسال می‌شود.
                     await message.answer(
                         post,
                         parse_mode=ParseMode.HTML,
@@ -2403,20 +2283,12 @@ async def process_news(
 
             else:
 
-                try:
-
-                    await message.answer_photo(
-                        FSInputFile(
-                            image_path
-                        )
+                # فقط در صورت عبور از محدودیت تلگرام
+                await message.answer_photo(
+                    FSInputFile(
+                        image_path
                     )
-
-                except Exception as error:
-
-                    log.warning(
-                        "Image preview failed: %s",
-                        error
-                    )
+                )
 
                 await message.answer(
                     post,
@@ -2434,7 +2306,7 @@ async def process_news(
 
         await message.answer(
             "✅ خبر آماده انتشار است.\n"
-            "اگر متن و تصویر مناسب هستند، روی «📢 انتشار در کانال» بزن.",
+            "برای انتشار روی «📢 انتشار در کانال» بزن.",
             reply_markup=main_reply_keyboard()
         )
 
@@ -2448,7 +2320,6 @@ async def process_news(
 
             try:
                 await status.delete()
-
             except Exception:
                 pass
 
@@ -2510,59 +2381,30 @@ async def publish_news(
 
             if len(text) <= 1024:
 
-                try:
-
-                    await message.bot.send_photo(
-                        CHANNEL_ID,
-                        FSInputFile(
-                            image
-                        ),
-                        caption=text,
-                        parse_mode=ParseMode.HTML
-                    )
-
-                except Exception as error:
-
-                    log.warning(
-                        "Photo publish failed: %s",
-                        error
-                    )
-
-                    await message.bot.send_message(
-                        CHANNEL_ID,
-                        text,
-                        parse_mode=ParseMode.HTML
-                    )
+                await message.bot.send_photo(
+                    CHANNEL_ID,
+                    FSInputFile(
+                        image
+                    ),
+                    caption=text,
+                    parse_mode=ParseMode.HTML
+                )
 
             else:
 
-                try:
-
-                    await message.bot.send_photo(
-                        CHANNEL_ID,
-                        FSInputFile(
-                            image
-                        )
+                # محدودیت واقعی Telegram
+                await message.bot.send_photo(
+                    CHANNEL_ID,
+                    FSInputFile(
+                        image
                     )
+                )
 
-                    await message.bot.send_message(
-                        CHANNEL_ID,
-                        text,
-                        parse_mode=ParseMode.HTML
-                    )
-
-                except Exception as error:
-
-                    log.warning(
-                        "Image + text publish failed: %s",
-                        error
-                    )
-
-                    await message.bot.send_message(
-                        CHANNEL_ID,
-                        text,
-                        parse_mode=ParseMode.HTML
-                    )
+                await message.bot.send_message(
+                    CHANNEL_ID,
+                    text,
+                    parse_mode=ParseMode.HTML
+                )
 
         # ====================================================
         # WITHOUT IMAGE
@@ -2610,7 +2452,9 @@ router = Router()
 # START
 # ============================================================
 
-@router.message(Command("start"))
+@router.message(
+    Command("start")
+)
 async def start_handler(
     message: Message
 ):
@@ -2633,7 +2477,7 @@ async def start_handler(
 
 
 # ============================================================
-# PUBLISH BUTTON
+# PUBLISH CALLBACK
 # ============================================================
 
 @router.callback_query(
@@ -2678,23 +2522,30 @@ async def home_callback(
     if not is_admin_id(
         callback.from_user.id
     ):
+
         await callback.answer(
             "⛔ دسترسی ندارید.",
             show_alert=True
         )
+
         return
 
     await callback.answer()
 
-    await callback.message.answer(
-        "✨ <b>پنل مدیریت Gamefa</b>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=main_reply_keyboard()
-    )
+    try:
+
+        await callback.message.answer(
+            "✨ <b>پنل مدیریت Gamefa</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=main_reply_keyboard()
+        )
+
+    except Exception:
+        pass
 
 
 # ============================================================
-# TEXT MENU HANDLER
+# NEWS MENU
 # ============================================================
 
 @router.message(
@@ -2727,7 +2578,7 @@ async def news_text_handler(
 
     await message.answer(
         "📝 متن خبر را ارسال کن.\n\n"
-        "AI کل متن را تحلیل می‌کند و یک خبر ۷ جمله‌ای می‌سازد."
+        "AI متن را تحلیل می‌کند و یک خبر ۷ جمله‌ای می‌سازد."
     )
 
 
@@ -2743,8 +2594,7 @@ async def news_link_handler(
 
     await message.answer(
         "🔗 لینک مقاله Gamefa را ارسال کن.\n\n"
-        "ربات کل مقاله را دریافت می‌کند، "
-        "اطلاعات اصلی را استخراج می‌کند و خبر را تولید می‌کند."
+        "ربات مقاله را دریافت و اطلاعات اصلی آن را استخراج می‌کند."
     )
 
 
@@ -2940,7 +2790,7 @@ async def image_setting_handler(
     await message.answer(
         "🖼 سیستم تصویر\n\n"
         "ربات ابتدا تصویر اصلی og:image مقاله را پیدا می‌کند.\n\n"
-        "اگر تصویر مناسب پیدا نشود، خبر بدون تصویر منتشر می‌شود.",
+        "در صورت پیدا نشدن تصویر مناسب، خبر بدون تصویر منتشر می‌شود.",
         reply_markup=settings_reply_keyboard()
     )
 
@@ -2964,7 +2814,7 @@ async def format_setting_handler(
         "• تاریخ و اعداد در صورت وجود\n"
         "• حذف اطلاعات Reviewer\n"
         "• حذف اطلاعات AI\n"
-        "• امضای Gamefa",
+        "• تصویر و متن در یک پیام در صورت رعایت محدودیت تلگرام",
         parse_mode=ParseMode.HTML,
         reply_markup=settings_reply_keyboard()
     )
@@ -2992,7 +2842,7 @@ async def back_handler(
 
 
 # ============================================================
-# COMMAND: PUBLISH
+# COMMAND PUBLISH
 # ============================================================
 
 @router.message(
@@ -3012,7 +2862,7 @@ async def publish_command(
 
 
 # ============================================================
-# COMMAND: STATS
+# COMMAND STATS
 # ============================================================
 
 @router.message(
@@ -3033,7 +2883,7 @@ async def stats_command(
 
 
 # ============================================================
-# COMMAND: CLEAR
+# COMMAND CLEAR
 # ============================================================
 
 @router.message(
@@ -3081,10 +2931,6 @@ async def text_handler(
 
     if text.startswith("/"):
         return
-
-    # ========================================================
-    # MENU WORDS
-    # ========================================================
 
     menu_words = {
         "🔎 بررسی خبر جدید",
